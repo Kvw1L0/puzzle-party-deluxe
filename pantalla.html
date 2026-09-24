@@ -140,55 +140,58 @@
       <!-- Arena de Juego (2 Columnas: Jugador Destacado + Ranking) -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start">
         
-        <!-- Columna Izquierda/Central: Tablero del Jugador Destacado (7 cols) -->
+        <!-- Columna Izquierda/Central: Patrón Objetivo a Completar (7 cols) -->
         <div class="lg:col-span-7 bg-black/50 border border-white/15 rounded-3xl p-6 backdrop-blur-xl shadow-2xl flex flex-col items-center">
           <div class="w-full flex items-center justify-between mb-4 border-b border-white/10 pb-3">
             <div>
-              <span class="text-[11px] font-black uppercase tracking-widest text-amber-400 block">JUGADOR/A DESTACADO/A</span>
-              <h3 id="screenPlayer" class="font-outfit font-black text-2xl text-white flex items-center gap-2 mt-0.5">
-                Sin seleccionar
+              <span class="text-[11px] font-black uppercase tracking-widest text-amber-400 block">PATRÓN OBJETIVO A COMPLETAR</span>
+              <h3 id="targetHeading" class="font-outfit font-black text-2xl text-white mt-0.5">
+                Así debe quedar el puzzle
               </h3>
             </div>
             <div class="text-right">
-              <span class="text-xs text-slate-400 uppercase font-semibold">Movimientos:</span>
-              <strong id="screenMoves" class="font-outfit font-black text-xl text-amber-300 ml-1">0</strong>
+              <span class="text-xs text-slate-400 uppercase font-semibold">Desafío:</span>
+              <strong id="targetSubtitle" class="font-outfit font-black text-base text-amber-300 ml-1">Color</strong>
             </div>
           </div>
 
-          <!-- Barra de Progreso del Jugador -->
-          <div class="w-full mb-4">
-            <div class="flex justify-between text-xs font-bold text-slate-300 mb-1">
-              <span>Progreso de armado:</span>
-              <span id="screenProgress" class="text-emerald-400 font-mono">0%</span>
-            </div>
-            <div class="w-full bg-white/10 rounded-full h-2.5 overflow-hidden">
-              <div id="screenProgressBar" class="bg-gradient-to-r from-amber-400 to-emerald-400 h-full transition-all duration-300 rounded-full" style="width: 0%"></div>
-            </div>
-          </div>
+          <!-- Tablero Objetivo Monumental en Pantalla -->
+          <div id="tvTargetBoardLarge" class="tv-target-board-large my-auto"></div>
+          <img id="tvTargetImageLarge" src="" alt="Objetivo del puzzle" class="hidden max-w-[420px] w-full aspect-square object-cover rounded-2xl border-4 border-amber-400 shadow-2xl my-auto">
 
-          <!-- Tablero Deslizante en Pantalla -->
-          <div id="screenBoard" class="puzzle-board screen-board-large"></div>
+          <!-- Instrucción inferior -->
+          <div class="mt-4 pt-3 border-t border-white/10 w-full flex items-center justify-between text-xs text-slate-300">
+            <span>✦ Mueve las fichas en tu pantalla táctil</span>
+            <span class="text-amber-400 font-bold">¡El primero en completarlo gana!</span>
+          </div>
         </div>
 
-        <!-- Columna Derecha: Objetivo y Clasificación (5 cols) -->
+        <!-- Columna Derecha: Clasificación en Vivo y Spotlight Opcional (5 cols) -->
         <div class="lg:col-span-5 flex flex-col gap-4">
           
-          <!-- Mini Card: Patrón Objetivo -->
-          <div class="bg-black/50 border border-white/15 rounded-3xl p-5 backdrop-blur-xl shadow-xl flex items-center justify-between">
-            <div>
-              <span class="text-[11px] font-black uppercase tracking-widest text-amber-400 block">OBJETIVO DE LA RONDA</span>
-              <p class="text-xs text-slate-300 mt-1 max-w-[180px]">Así debe quedar el puzzle resuelto:</p>
+          <!-- Card de Jugador Destacado (Opcional, solo si el Admin selecciona a alguien) -->
+          <div id="tvSpotlightBox" class="hidden bg-black/50 border border-amber-400/50 rounded-3xl p-5 backdrop-blur-xl shadow-xl flex flex-col">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[11px] font-black uppercase tracking-widest text-amber-400">JUGADOR EN SPOTLIGHT</span>
+              <span id="screenMoves" class="text-xs font-bold text-slate-300">0 mov.</span>
             </div>
-            <div id="targetBoard" class="target-board"></div>
+            <div class="flex items-center gap-3">
+              <span id="screenPlayerAvatar" class="text-3xl">🦊</span>
+              <h4 id="screenPlayer" class="font-outfit font-black text-xl text-white">Sin seleccionar</h4>
+            </div>
+            <!-- Mini board de spotlight -->
+            <div id="screenBoard" class="puzzle-board mt-2" style="max-width: 200px; padding: 6px; gap: 4px;"></div>
           </div>
 
           <!-- Card: Tabla de Clasificación en Vivo -->
-          <div class="bg-black/50 border border-white/15 rounded-3xl p-5 backdrop-blur-xl shadow-2xl flex flex-col h-[380px]">
+          <div class="bg-black/50 border border-white/15 rounded-3xl p-5 backdrop-blur-xl shadow-2xl flex flex-col h-[460px]">
             <div class="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
               <h4 class="font-outfit font-extrabold text-base text-white flex items-center gap-2">
                 <i data-lucide="trophy" class="w-4 h-4 text-amber-400"></i> Clasificación en Vivo
               </h4>
-              <span class="text-[11px] uppercase font-bold text-slate-400">Tiempo / Mov.</span>
+              <span id="tvFinishedCount" class="text-xs font-bold bg-amber-400/20 text-amber-300 px-2.5 py-0.5 rounded-full">
+                0 terminados
+              </span>
             </div>
             <div id="screenRanking" class="flex-1 overflow-y-auto space-y-2 pr-1">
               <p class="text-xs text-slate-400 text-center py-10 italic">

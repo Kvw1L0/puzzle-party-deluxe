@@ -10,7 +10,11 @@ const modes = {
   brand: { title: 'Modo marca', hint: 'Revela el mensaje oculto.' }
 };
 
-const initialTarget = size => Array.from({ length: size * size }, (_, i) => i === size * size - 1 ? null : i);
+// -1 representa el espacio vacío (nunca es eliminado por Firebase RTDB)
+const initialTarget = size => {
+  const total = size * size;
+  return Array.from({ length: total }, (_, i) => i === total - 1 ? -1 : i);
+};
 
 let state = {
   mode: 'pattern',
@@ -21,7 +25,7 @@ let state = {
   moves: 0,
   seconds: 0,
   running: false,
-  featured: null,
+  featured: null, // Por defecto null (sin spotlight)
   image: null,
   scores: [],
   remotePlayers: {},
@@ -103,8 +107,8 @@ function playVictorySound() {
   } catch (e) {}
 }
 
-function neighbours(index) {
-  const n = state.size;
+function neighbours(index, size = state.size) {
+  const n = size;
   const row = Math.floor(index / n);
   const col = index % n;
   return [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]]
@@ -112,18 +116,33 @@ function neighbours(index) {
     .map(([r, c]) => r * n + c);
 }
 
-// Genera un tablero 100% resoluble mediante movimientos legales aleatorios
-function shuffle() {
-  const board = [...state.target];
-  let empty = tileCount() - 1;
+function isSolved(board, target) {
+  if (!Array.isArray(board) || !Array.isArray(target) || board.length !== target.length) return false;
+  return board.every((val, idx) => val === target[idx]);
+}
+
+// Genera un tablero 100% resoluble y garantizadamente desordenado
+function generateShuffledBoard(size, target) {
+  const len = size * size;
+  let board = [...target];
+  let empty = board.indexOf(-1);
+  if (empty === -1) empty = len - 1;
   let last = -1;
-  const movesCount = Math.max(90, tileCount() * 22);
+  const movesCount = Math.max(90, len * 24);
+
   for (let i = 0; i < movesCount; i++) {
-    const choices = neighbours(empty).filter(idx => idx !== last);
+    const choices = neighbours(empty, size).filter(idx => idx !== last);
     const next = choices[Math.floor(Math.random() * choices.length)];
     [board[empty], board[next]] = [board[next], board[empty]];
     last = empty;
     empty = next;
+  }
+
+  // Garantizar que NO quede resuelto por casualidad
+  if (isSolved(board, target)) {
+    const choices = neighbours(empty, size);
+    const next = choices[0];
+    [board[empty], board[next]] = [board[next], board[empty]];
   }
   return board;
 }
@@ -144,7 +163,7 @@ function joinUrl() {
 }
 
 function tileStyle(value) {
-  if (value === null) return '';
+  if (value === -1 || value === null) return '';
   if (state.mode === 'numbers') {
     return 'background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); border-color: rgba(251, 191, 36, 0.4);';
   }
@@ -162,18 +181,18 @@ function tileStyle(value) {
 }
 
 function tileText(value) {
-  if (value === null) return '';
+  if (value === -1 || value === null) return '';
   if (state.mode === 'numbers') return value + 1;
   if (state.mode === 'brand') return ['P', 'U', 'Z', 'Z', 'L', 'E', '!', '★'][value % 8];
   return '';
 }
 
-function makeTile(value, interactive = false, index = null) {
+// SIN checks de verificación en ningún momento
+function makeTile(value, interactive = false) {
   const el = document.createElement(interactive ? 'button' : 'div');
-  const isEmpty = value === null;
-  const isCorrect = !isEmpty && state.target && index !== null && value === state.target[index];
+  const isEmpty = value === -1 || value === null;
 
-  el.className = `tile ${isEmpty ? 'empty' : ''} ${isCorrect ? 'is-correct' : ''}`;
+  el.className = `tile ${isEmpty ? 'empty' : ''}`;
   el.style.cssText = tileStyle(value);
   el.textContent = tileText(value);
 
@@ -182,15 +201,6 @@ function makeTile(value, interactive = false, index = null) {
     el.onclick = () => move(value);
   }
   return el;
-}
-
-function featuredPlayer() {
-  if (state.featured && state.remotePlayers?.[state.featured]) {
-    return state.remotePlayers[state.featured];
-  }
-  const firstId = Object.keys(state.remotePlayers || {})[0];
-  if (firstId) return state.remotePlayers[firstId];
-  return { name: 'Aún sin seleccionar', avatar: '🎮', board: state.target, moves: 0, seconds: 0 };
 }
 
 function renderQr() {
@@ -221,7 +231,7 @@ function renderBoard() {
   if (boardEl) {
     boardEl.style.gridTemplateColumns = `repeat(${state.size}, 1fr)`;
     boardEl.innerHTML = '';
-    state.board.forEach((val, idx) => boardEl.append(makeTile(val, true, idx)));
+    state.board.forEach(val => boardEl.append(makeTile(val, true)));
   }
 
   const targetEl = $('#targetBoard');
@@ -230,7 +240,8 @@ function renderBoard() {
     targetEl.innerHTML = '';
     state.target.forEach(val => {
       const item = document.createElement('div');
-      item.className = `target-tile ${val === null ? 'empty' : ''}`;
+      const isEmpty = val === -1 || val === null;
+      item.className = `target-tile ${isEmpty ? 'empty' : ''}`;
       item.style.cssText = tileStyle(val);
       item.textContent = tileText(val);
       targetEl.append(item);
@@ -242,30 +253,75 @@ function renderBoard() {
   renderLive();
 }
 
+// Renderizado de Pantalla Gigante y Admin
 function renderLive() {
-  const featured = featuredPlayer();
-  const values = featured.board?.length ? featured.board : state.target;
+  // 1. Renderizar Patrón Objetivo Monumental por defecto en Pantalla Gigante
+  const tvTargetBoard = $('#tvTargetBoardLarge');
+  const tvTargetImage = $('#tvTargetImageLarge');
+  const targetHeading = $('#targetHeading');
+  const targetSubtitle = $('#targetSubtitle');
 
-  [$('#livePreview'), $('#screenBoard')].forEach(board => {
-    if (!board) return;
-    board.style.gridTemplateColumns = `repeat(${state.size}, 1fr)`;
-    board.innerHTML = '';
-    values.forEach((val, idx) => board.append(makeTile(val, false, idx)));
-  });
-
-  if ($('#featuredName')) $('#featuredName').textContent = featured.name || 'Sin seleccionar';
-  if ($('#screenPlayer')) {
-    $('#screenPlayer').innerHTML = `<span class="text-3xl">${featured.avatar || '🦊'}</span> <span>${escapeHtml(featured.name || 'Sin seleccionar')}</span>`;
+  if (targetHeading) {
+    targetHeading.textContent = modes[state.mode]?.title || state.title || 'Patrón Objetivo';
   }
-  if ($('#screenClock')) $('#screenClock').textContent = format(state.seconds || featured.seconds || 0);
-  if ($('#screenMoves')) $('#screenMoves').textContent = featured.moves || 0;
+  if (targetSubtitle) {
+    targetSubtitle.textContent = `${state.size}×${state.size} (${tileCount() - 1} fichas)`;
+  }
 
-  const correctCount = values.reduce((acc, val, idx) => acc + (val !== null && val === state.target[idx] ? 1 : 0), 0);
-  const totalPlayable = tileCount() - 1;
-  const pct = Math.round((correctCount / totalPlayable) * 100);
+  if (state.mode === 'image' && state.image) {
+    if (tvTargetBoard) tvTargetBoard.classList.add('hidden');
+    if (tvTargetImage) {
+      tvTargetImage.src = state.image;
+      tvTargetImage.classList.remove('hidden');
+    }
+  } else {
+    if (tvTargetImage) tvTargetImage.classList.add('hidden');
+    if (tvTargetBoard) {
+      tvTargetBoard.classList.remove('hidden');
+      tvTargetBoard.style.gridTemplateColumns = `repeat(${state.size}, 1fr)`;
+      tvTargetBoard.innerHTML = '';
+      state.target.forEach(val => {
+        const item = document.createElement('div');
+        const isEmpty = val === -1 || val === null;
+        item.className = `tv-target-tile-large ${isEmpty ? 'empty' : ''}`;
+        item.style.cssText = tileStyle(val);
+        item.textContent = tileText(val);
+        tvTargetBoard.append(item);
+      });
+    }
+  }
 
-  if ($('#screenProgress')) $('#screenProgress').textContent = `${pct}%`;
-  if ($('#screenProgressBar')) $('#screenProgressBar').style.width = `${pct}%`;
+  // 2. Spotlight opcional (solo si el admin seleccionó a un jugador particular)
+  const spotlightBox = $('#tvSpotlightBox');
+  if (spotlightBox) {
+    const hasFeatured = state.featured && state.remotePlayers?.[state.featured];
+    spotlightBox.classList.toggle('hidden', !hasFeatured);
+    if (hasFeatured) {
+      const p = state.remotePlayers[state.featured];
+      if ($('#screenPlayer')) $('#screenPlayer').textContent = p.name || 'Jugador';
+      if ($('#screenPlayerAvatar')) $('#screenPlayerAvatar').textContent = p.avatar || '🦊';
+      if ($('#screenMoves')) $('#screenMoves').textContent = `${p.moves || 0} mov.`;
+      const boardEl = $('#screenBoard');
+      if (boardEl) {
+        boardEl.style.gridTemplateColumns = `repeat(${state.size}, 1fr)`;
+        boardEl.innerHTML = '';
+        (p.board?.length ? p.board : state.target).forEach(val => boardEl.append(makeTile(val, false)));
+      }
+    }
+  }
+
+  // Mini preview en el panel del admin
+  const livePreview = $('#livePreview');
+  if (livePreview) {
+    const p = state.featured ? state.remotePlayers?.[state.featured] : null;
+    const values = p?.board?.length ? p.board : state.target;
+    livePreview.style.gridTemplateColumns = `repeat(${state.size}, 1fr)`;
+    livePreview.innerHTML = '';
+    values.forEach(val => livePreview.append(makeTile(val, false)));
+    if ($('#featuredName')) $('#featuredName').textContent = p ? p.name : 'Sin seleccionar';
+  }
+
+  if ($('#screenClock')) $('#screenClock').textContent = format(state.seconds || 0);
   if ($('#screenMode')) $('#screenMode').textContent = `${state.title} (${state.size}×${state.size})`;
   if ($('#liveGameTitle')) $('#liveGameTitle').textContent = `${state.title} (${state.size}×${state.size})`;
 
@@ -302,6 +358,9 @@ function renderPlayers() {
   if ($('#tvLobbyCount')) $('#tvLobbyCount').textContent = entries.length;
   if ($('#roomPlayerCount')) $('#roomPlayerCount').textContent = `${entries.length} en sala`;
 
+  const finishedCount = entries.filter(([, p]) => p.status === 'terminó').length;
+  if ($('#tvFinishedCount')) $('#tvFinishedCount').textContent = `${finishedCount} terminados`;
+
   // Admin List
   const list = $('#playerList');
   if (list) {
@@ -333,9 +392,9 @@ function renderPlayers() {
           </div>
         `;
         row.onclick = () => {
-          state.featured = id;
+          state.featured = isSelected ? null : id; // Toggle spotlight
           if (db && state.pin) {
-            db.ref(`puzzle_party/rooms/${state.pin}/featured`).set(id);
+            db.ref(`puzzle_party/rooms/${state.pin}/featured`).set(state.featured);
           }
           renderAll();
         };
@@ -348,7 +407,7 @@ function renderPlayers() {
 
   const select = $('#spotlightSelect');
   if (select) {
-    select.innerHTML = '<option value="">Selecciona jugador destacado</option>';
+    select.innerHTML = '<option value="">Sin destacar (Mostrar Objetivo)</option>';
     entries.forEach(([id, p]) => {
       const opt = document.createElement('option');
       opt.value = id;
@@ -495,7 +554,7 @@ function renderAll() {
 
 function timer() {
   if (state.status !== 'playing' || state.completed) return;
-  const startedAt = (page() === 'play' ? state.remotePlayers?.[playerId]?.startedAt : null) || state.startedAt || Date.now();
+  const startedAt = state.startedAt || Date.now();
   if (state.running && activePlayerStart === startedAt) return;
   state.running = true;
   activePlayerStart = startedAt;
@@ -520,7 +579,8 @@ function timer() {
 function move(value) {
   if (state.status !== 'playing' || state.completed) return;
   const from = state.board.indexOf(value);
-  const empty = state.board.indexOf(null);
+  const empty = state.board.indexOf(-1);
+  if (empty === -1 || from === -1) return;
   if (!neighbours(empty).includes(from)) return;
 
   [state.board[from], state.board[empty]] = [state.board[empty], state.board[from]];
@@ -532,21 +592,25 @@ function move(value) {
   renderBoard();
   syncPlayerToCloud();
 
-  const isComplete = state.board.every((p, idx) => p === state.target[idx]);
-  if (isComplete) complete();
+  if (isSolved(state.board, state.target)) {
+    complete();
+  }
 }
 
+// Reiniciar puzzle: vuelve a desordenar, movimientos a 0, completed a false, y el tiempo SIGUE CORRIENDO
 function resetPlayer() {
-  clearInterval(tick);
-  activePlayerStart = null;
-  state.board = shuffle();
+  state.board = generateShuffledBoard(state.size, state.target);
   state.moves = 0;
-  state.seconds = 0;
-  state.running = false;
   state.completed = false;
-  renderAll();
+  $('#modal')?.classList.add('hidden');
+
+  // El cronómetro continúa corriendo sin detenerse
+  if (state.status === 'playing') {
+    if (!state.running) timer();
+  }
+
+  renderBoard();
   syncPlayerToCloud();
-  if (state.status === 'playing') timer();
 }
 
 function complete() {
@@ -588,7 +652,7 @@ function applyConfiguration() {
   state.title = $('#roundTitle')?.value.trim() || modes[state.mode].title;
   state.size = Number($('#gridSize')?.value) === 4 ? 4 : 3;
   state.target = initialTarget(state.size);
-  state.board = [...state.target];
+  state.board = generateShuffledBoard(state.size, state.target);
   state.status = 'lobby';
   state.startedAt = null;
   state.completed = false;
@@ -618,11 +682,11 @@ function newRoom() {
   state.pin = pin;
   state.roomOpen = true;
   state.status = 'lobby';
-  state.featured = null;
+  state.featured = null; // Sin spotlight por defecto
   state.startedAt = null;
   state.completed = false;
   state.running = false;
-  state.board = shuffle();
+  state.board = generateShuffledBoard(state.size, state.target);
   state.remotePlayers = {};
   lastCelebratedPlayer = null;
 
@@ -639,13 +703,13 @@ function newRoom() {
       image: state.image || null,
       startedAt: null,
       background: state.background || null,
+      featured: null,
       createdAt: Date.now()
     };
     db.ref(`puzzle_party/rooms/${pin}`).set(roomPayload);
     db.ref('puzzle_party/activeRoom').set(pin);
     db.ref('puzzle_party/sala_activa').set(roomPayload);
 
-    // Suscribir a la nueva sala
     subscribeToRoom(pin);
   }
 
@@ -664,21 +728,23 @@ function startGame() {
   state.seconds = 0;
   state.completed = false;
   state.running = false;
-  state.featured = state.featured || entries[0][0];
+  state.featured = null; // No forzar spotlight sobre nadie al iniciar
 
   if (db && state.pin) {
     const updates = {
       status: 'playing',
       roomOpen: false,
       startedAt: state.startedAt,
-      featured: state.featured
+      featured: null
     };
     db.ref(`puzzle_party/rooms/${state.pin}`).update(updates);
     db.ref('puzzle_party/sala_activa').update(updates);
 
+    // Asegurar que cada participante tenga un tablero DESORDENADO y resoluble
     entries.forEach(([id, p]) => {
+      const freshBoard = generateShuffledBoard(state.size, state.target);
       db.ref(`puzzle_party/rooms/${state.pin}/players/${id}`).update({
-        board: shuffle(),
+        board: freshBoard,
         moves: 0,
         seconds: 0,
         status: 'jugando',
@@ -714,8 +780,9 @@ function restartForEveryone() {
 
     const entries = Object.entries(state.remotePlayers || {});
     entries.forEach(([id, p]) => {
+      const freshBoard = generateShuffledBoard(state.size, state.target);
       db.ref(`puzzle_party/rooms/${state.pin}/players/${id}`).update({
-        board: shuffle(),
+        board: freshBoard,
         moves: 0,
         seconds: 0,
         status: 'jugando',
@@ -773,7 +840,6 @@ function joinRoom() {
   joinError = '';
   renderAll();
 
-  // Consultar en Firebase Realtime Database
   if (!db) {
     joinError = 'Conectando con el servidor... Intenta nuevamente en un segundo.';
     renderAll();
@@ -805,14 +871,15 @@ function joinRoom() {
     state.size = room.size || 3;
     state.title = room.title || 'Patrón de color';
     state.target = room.target || initialTarget(state.size);
-    state.board = [...state.target];
+    // El puzzle del jugador SIEMPRE inicia desordenado
+    state.board = generateShuffledBoard(state.size, state.target);
     state.image = room.image || null;
     state.status = room.status || 'lobby';
     state.moves = 0;
     state.seconds = 0;
     state.completed = false;
 
-    // Registrar jugador en la sala
+    // Registrar jugador en la sala con tablero desordenado
     db.ref(`puzzle_party/rooms/${pin}/players/${playerId}`).set({
       id: playerId,
       name: player,
@@ -825,7 +892,6 @@ function joinRoom() {
       joinedAt: Date.now()
     });
 
-    // Suscribir a eventos de la sala
     subscribeToRoom(pin);
     renderAll();
   }).catch(err => {
@@ -875,12 +941,19 @@ function subscribeToRoom(pin) {
     state.background = val.background || null;
     state.status = val.status || 'lobby';
     state.roomOpen = val.roomOpen !== undefined ? val.roomOpen : true;
-    state.featured = val.featured || state.featured;
+    state.featured = val.featured || null;
     state.startedAt = val.startedAt || null;
 
     if (page() === 'play' && player) {
-      if (state.status === 'playing' && state.startedAt && !state.completed) {
-        timer();
+      if (state.status === 'playing') {
+        // Asegurar que el tablero esté desordenado al empezar la partida
+        if (!state.board || state.board.length !== tileCount() || isSolved(state.board, state.target)) {
+          state.board = generateShuffledBoard(state.size, state.target);
+          syncPlayerToCloud();
+        }
+        if (!state.completed) {
+          timer();
+        }
       } else if (state.status !== 'playing') {
         clearInterval(tick);
         state.running = false;
@@ -897,11 +970,15 @@ function subscribeToRoom(pin) {
     if (page() === 'play' && player) {
       const mine = state.remotePlayers[playerId];
       if (mine) {
-        if (mine.board?.length) state.board = mine.board;
+        if (Array.isArray(mine.board) && mine.board.length === tileCount()) {
+          state.board = mine.board;
+        }
         if (Number.isFinite(mine.moves)) state.moves = mine.moves;
         if (Number.isFinite(mine.seconds)) state.seconds = mine.seconds;
         state.completed = !!mine.completed;
-        if (mine.status === 'jugando') timer();
+        if (mine.status === 'jugando' && !state.completed) {
+          timer();
+        }
         if (mine.status === 'terminó') {
           state.running = false;
           clearInterval(tick);
@@ -922,11 +999,8 @@ function connectFirebase() {
     }
     db = firebase.database();
     isConnected = true;
-    console.log("🔥 Conectado a Firebase Realtime Database");
 
-    // Sincronización automática de sala activa
     if (page() === 'screen') {
-      // Pantalla TV: escuchar sala activa global
       const urlParams = new URLSearchParams(location.search);
       const urlPin = urlParams.get('pin') || urlParams.get('room');
 
@@ -941,7 +1015,6 @@ function connectFirebase() {
         });
       }
     } else if (page() === 'admin') {
-      // Admin: cargar sala activa existente o crear una inicial
       db.ref('puzzle_party/activeRoom').once('value', snap => {
         const pin = snap.val();
         if (pin) {
@@ -952,14 +1025,12 @@ function connectFirebase() {
         }
       });
     } else if (page() === 'play') {
-      // Jugador: si ya estaba unido a una sala
       const urlParams = new URLSearchParams(location.search);
       const urlPin = urlParams.get('pin') || urlParams.get('room');
       if (urlPin && $('#pinInput')) {
         $('#pinInput').value = urlPin;
         setTimeout(() => $('#nameInput')?.focus(), 250);
       } else {
-        // Prellenar con sala activa si está en lobby
         db.ref('puzzle_party/activeRoom').once('value', snap => {
           const pin = snap.val();
           if (pin && $('#pinInput') && !$('#pinInput').value) {
@@ -997,7 +1068,7 @@ function enableSwipeGestures() {
       const absDy = Math.abs(dy);
 
       if (Math.max(absDx, absDy) > 25) {
-        const emptyIdx = state.board.indexOf(null);
+        const emptyIdx = state.board.indexOf(-1);
         if (emptyIdx === -1) return;
         const n = state.size;
         const emptyRow = Math.floor(emptyIdx / n);
@@ -1005,28 +1076,22 @@ function enableSwipeGestures() {
 
         let targetIdx = -1;
         if (absDx > absDy) {
-          // Deslizamiento horizontal
           if (dx > 0 && emptyCol > 0) {
-            // Deslizó hacia la derecha -> mueve la ficha a la izquierda del espacio
             targetIdx = emptyIdx - 1;
           } else if (dx < 0 && emptyCol < n - 1) {
-            // Deslizó hacia la izquierda -> mueve la ficha a la derecha del espacio
             targetIdx = emptyIdx + 1;
           }
         } else {
-          // Deslizamiento vertical
           if (dy > 0 && emptyRow > 0) {
-            // Deslizó hacia abajo -> mueve la ficha de arriba al espacio
             targetIdx = emptyIdx - n;
           } else if (dy < 0 && emptyRow < n - 1) {
-            // Deslizó hacia arriba -> mueve la ficha de abajo al espacio
             targetIdx = emptyIdx + n;
           }
         }
 
         if (targetIdx >= 0 && targetIdx < tileCount()) {
           const val = state.board[targetIdx];
-          if (val !== null) move(val);
+          if (val !== -1) move(val);
         }
       }
     }
@@ -1164,7 +1229,7 @@ function bindEvents() {
 function init() {
   state.size = state.size === 4 ? 4 : 3;
   state.target = initialTarget(state.size);
-  state.board = [...state.target];
+  state.board = generateShuffledBoard(state.size, state.target);
 
   renderAll();
   connectFirebase();
