@@ -1,4 +1,4 @@
-// Puzzle Party Deluxe — Unified Application Engine
+// Puzzle Party Deluxe — Realtime Database Game Engine
 const colors = ['#2563eb', '#06b6d4', '#ec4899', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#f97316'];
 const avatars = ['🦊', '🐼', '🐸', '🦁', '🐙', '🐨', '🐯', '🐵', '🐧', '🦄', '🐝', '🐳', '🚀', '⚡', '💎', '🔥'];
 
@@ -25,9 +25,9 @@ let state = {
   image: null,
   scores: [],
   remotePlayers: {},
-  status: 'setup', // 'setup' | 'lobby' | 'playing' | 'finished'
+  status: 'lobby', // 'setup' | 'lobby' | 'playing' | 'finished'
   pin: '',
-  roomOpen: false,
+  roomOpen: true,
   startedAt: null,
   background: null,
   soundOn: false
@@ -35,26 +35,21 @@ let state = {
 
 let player = sessionStorage.getItem('puzzle-deluxe-id') ? (localStorage.getItem('puzzle-deluxe-player') || '') : '';
 let playerIcon = localStorage.getItem('puzzle-deluxe-avatar') || avatars[0];
-let playerId = sessionStorage.getItem('puzzle-deluxe-id') || `guest-${Math.random().toString(36).slice(2, 10)}`;
+let playerId = sessionStorage.getItem('puzzle-deluxe-id') || `p_${Math.random().toString(36).slice(2, 9)}`;
+sessionStorage.setItem('puzzle-deluxe-id', playerId);
 
 let tick = null;
 let db = null;
-let user = null;
-let cloudReady = false;
+let isConnected = false;
 let activePlayerStart = null;
 let joinError = '';
 let lastCelebratedPlayer = null;
 
-// Web Audio API
+// Audio Context
 let audioCtx = null;
-let musicLoop = null;
-let musicGain = null;
-let musicStep = 0;
 
 const $ = selector => document.querySelector(selector);
 const page = () => document.body.dataset.page || 'play';
-const eventRef = () => db.collection('events').doc('principal');
-const playersRef = () => eventRef().collection('players');
 const tileCount = () => state.size * state.size;
 
 function getAudioContext() {
@@ -76,13 +71,13 @@ function playSlideSound() {
     const gain = ctx.createGain();
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(320, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(160, ctx.currentTime + 0.06);
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(160, ctx.currentTime + 0.05);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
-    osc.stop(ctx.currentTime + 0.07);
+    osc.stop(ctx.currentTime + 0.06);
   } catch (e) {}
 }
 
@@ -117,7 +112,7 @@ function neighbours(index) {
     .map(([r, c]) => r * n + c);
 }
 
-// Genera un tablero garantizadamente resoluble ejecutando movimientos legales aleatorios
+// Genera un tablero 100% resoluble mediante movimientos legales aleatorios
 function shuffle() {
   const board = [...state.target];
   let empty = tileCount() - 1;
@@ -281,12 +276,13 @@ function renderLive() {
 function renderPlayers() {
   const entries = Object.entries(state.remotePlayers || {});
 
-  // Actualizar Lobby en TV
+  // TV Lobby Players Grid
   const tvGrid = $('#tvPlayersGrid');
   const tvEmpty = $('#tvEmptyMessage');
   if (tvGrid) {
     if (entries.length === 0) {
       if (tvEmpty) tvEmpty.style.display = 'block';
+      tvGrid.querySelectorAll('.player-chip').forEach(el => el.remove());
     } else {
       if (tvEmpty) tvEmpty.style.display = 'none';
       tvGrid.querySelectorAll('.player-chip').forEach(el => el.remove());
@@ -306,7 +302,7 @@ function renderPlayers() {
   if ($('#tvLobbyCount')) $('#tvLobbyCount').textContent = entries.length;
   if ($('#roomPlayerCount')) $('#roomPlayerCount').textContent = `${entries.length} en sala`;
 
-  // Actualizar Admin List
+  // Admin List
   const list = $('#playerList');
   if (list) {
     const query = $('#playerSearch')?.value.toLowerCase() || '';
@@ -338,7 +334,9 @@ function renderPlayers() {
         `;
         row.onclick = () => {
           state.featured = id;
-          persist();
+          if (db && state.pin) {
+            db.ref(`puzzle_party/rooms/${state.pin}/featured`).set(id);
+          }
           renderAll();
         };
         list.append(row);
@@ -421,7 +419,6 @@ function celebrateWinner(playerData) {
     setTimeout(() => confetti({ particleCount: 80, spread: 100, origin: { y: 0.4 } }), 500);
   }
 
-  // Ocultar después de 4.5 segundos para continuar viendo el ranking
   setTimeout(() => {
     overlay.classList.add('hidden');
     overlay.classList.remove('flex');
@@ -513,7 +510,7 @@ function timer() {
     state.seconds = Math.max(0, (Date.now() - startedAt) / 1000);
     if (page() === 'play') {
       if ($('#timer')) $('#timer').textContent = format(state.seconds);
-      if (state.seconds % 1 < 0.25) persist();
+      if (state.seconds % 1 < 0.25) syncPlayerToCloud();
     } else {
       if ($('#screenClock')) $('#screenClock').textContent = format(state.seconds);
     }
@@ -532,8 +529,8 @@ function move(value) {
   playSlideSound();
   if (navigator.vibrate) navigator.vibrate(12);
 
-  persist();
   renderBoard();
+  syncPlayerToCloud();
 
   const isComplete = state.board.every((p, idx) => p === state.target[idx]);
   if (isComplete) complete();
@@ -547,15 +544,8 @@ function resetPlayer() {
   state.seconds = 0;
   state.running = false;
   state.completed = false;
-  if (state.status === 'playing') {
-    state.remotePlayers[playerId] = {
-      ...(state.remotePlayers[playerId] || {}),
-      startedAt: Date.now(),
-      status: 'jugando'
-    };
-  }
-  persist();
   renderAll();
+  syncPlayerToCloud();
   if (state.status === 'playing') timer();
 }
 
@@ -563,7 +553,6 @@ function complete() {
   state.running = false;
   state.completed = true;
   clearInterval(tick);
-  persist();
 
   playVictorySound();
   if (typeof confetti === 'function') {
@@ -573,45 +562,25 @@ function complete() {
   if ($('#resultTime')) $('#resultTime').textContent = format(state.seconds);
   if ($('#resultMoves')) $('#resultMoves').textContent = state.moves;
   if ($('#modal')) $('#modal').classList.remove('hidden');
+
+  syncPlayerToCloud();
 }
 
-function persist() {
-  try {
-    localStorage.setItem('puzzle-party-state', JSON.stringify(state));
-  } catch (e) {}
-
-  if (!cloudReady || !user) return;
-
-  if (page() === 'play' && player && state.pin) {
-    const status = state.completed ? 'terminó' : state.status === 'lobby' ? 'esperando' : state.status === 'playing' ? 'jugando' : 'conectado';
-    playersRef().doc(playerId).set({
-      name: player,
-      avatar: playerIcon,
-      board: state.board,
-      moves: state.moves,
-      seconds: state.seconds,
-      startedAt: state.remotePlayers?.[playerId]?.startedAt || state.startedAt || null,
-      running: state.running,
-      completed: !!state.completed,
-      status,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true }).catch(() => {});
-  } else if (page() === 'admin') {
-    eventRef().set({
-      mode: state.mode,
-      title: state.title,
-      size: state.size,
-      target: state.target,
-      image: state.image,
-      featured: state.featured,
-      status: state.status,
-      pin: state.pin,
-      roomOpen: state.roomOpen,
-      startedAt: state.startedAt,
-      background: state.background,
-      soundOn: state.soundOn
-    }, { merge: true }).catch(err => console.warn('Sync error:', err.message));
-  }
+function syncPlayerToCloud() {
+  if (!db || !state.pin || !player) return;
+  const status = state.completed ? 'terminó' : state.status === 'lobby' ? 'esperando' : state.status === 'playing' ? 'jugando' : 'conectado';
+  db.ref(`puzzle_party/rooms/${state.pin}/players/${playerId}`).update({
+    id: playerId,
+    name: player,
+    avatar: playerIcon,
+    board: state.board,
+    moves: state.moves,
+    seconds: state.seconds,
+    running: state.running,
+    completed: !!state.completed,
+    status: status,
+    updatedAt: Date.now()
+  }).catch(() => {});
 }
 
 function applyConfiguration() {
@@ -620,19 +589,33 @@ function applyConfiguration() {
   state.size = Number($('#gridSize')?.value) === 4 ? 4 : 3;
   state.target = initialTarget(state.size);
   state.board = [...state.target];
-  state.status = 'setup';
-  state.roomOpen = false;
-  state.featured = null;
+  state.status = 'lobby';
   state.startedAt = null;
   state.completed = false;
   state.running = false;
-  persist();
+
+  if (db && state.pin) {
+    db.ref(`puzzle_party/rooms/${state.pin}`).update({
+      mode: state.mode,
+      title: state.title,
+      size: state.size,
+      target: state.target,
+      image: state.image || null,
+      status: state.status
+    });
+    db.ref('puzzle_party/sala_activa').update({
+      mode: state.mode,
+      title: state.title,
+      size: state.size
+    });
+  }
   renderAll();
   alert('Configuración guardada.');
 }
 
 function newRoom() {
-  state.pin = String(Math.floor(100000 + Math.random() * 900000));
+  const pin = String(Math.floor(100000 + Math.random() * 900000));
+  state.pin = pin;
   state.roomOpen = true;
   state.status = 'lobby';
   state.featured = null;
@@ -640,27 +623,33 @@ function newRoom() {
   state.completed = false;
   state.running = false;
   state.board = shuffle();
+  state.remotePlayers = {};
   lastCelebratedPlayer = null;
 
-  if (cloudReady) {
-    playersRef().get().then(snapshot => {
-      const batch = db.batch();
-      snapshot.forEach(doc => batch.delete(doc.ref));
-      return batch.commit();
-    }).then(() => {
-      state.remotePlayers = {};
-      persist();
-      renderAll();
-    }).catch(() => {
-      state.remotePlayers = {};
-      persist();
-      renderAll();
-    });
-  } else {
-    state.remotePlayers = {};
-    persist();
-    renderAll();
+  if (db) {
+    const roomPayload = {
+      pin: pin,
+      code: pin,
+      roomOpen: true,
+      status: 'lobby',
+      title: state.title,
+      mode: state.mode,
+      size: state.size,
+      target: state.target,
+      image: state.image || null,
+      startedAt: null,
+      background: state.background || null,
+      createdAt: Date.now()
+    };
+    db.ref(`puzzle_party/rooms/${pin}`).set(roomPayload);
+    db.ref('puzzle_party/activeRoom').set(pin);
+    db.ref('puzzle_party/sala_activa').set(roomPayload);
+
+    // Suscribir a la nueva sala
+    subscribeToRoom(pin);
   }
+
+  renderAll();
 }
 
 function startGame() {
@@ -677,20 +666,28 @@ function startGame() {
   state.running = false;
   state.featured = state.featured || entries[0][0];
 
-  if (cloudReady) {
+  if (db && state.pin) {
+    const updates = {
+      status: 'playing',
+      roomOpen: false,
+      startedAt: state.startedAt,
+      featured: state.featured
+    };
+    db.ref(`puzzle_party/rooms/${state.pin}`).update(updates);
+    db.ref('puzzle_party/sala_activa').update(updates);
+
     entries.forEach(([id, p]) => {
-      playersRef().doc(id).set({
-        ...p,
+      db.ref(`puzzle_party/rooms/${state.pin}/players/${id}`).update({
         board: shuffle(),
         moves: 0,
         seconds: 0,
         status: 'jugando',
         completed: false,
         startedAt: state.startedAt
-      }, { merge: true });
+      });
     });
   }
-  persist();
+
   renderAll();
   timer();
 }
@@ -705,21 +702,29 @@ function restartForEveryone() {
   state.running = false;
   lastCelebratedPlayer = null;
 
-  const entries = Object.entries(state.remotePlayers || {});
-  entries.forEach(([id, p]) => {
-    const updated = {
-      ...p,
-      board: shuffle(),
-      moves: 0,
-      seconds: 0,
-      status: 'jugando',
-      completed: false,
-      startedAt: state.startedAt
-    };
-    state.remotePlayers[id] = updated;
-    if (cloudReady) playersRef().doc(id).set(updated, { merge: true });
-  });
-  persist();
+  if (db && state.pin) {
+    db.ref(`puzzle_party/rooms/${state.pin}`).update({
+      startedAt: state.startedAt,
+      status: 'playing'
+    });
+    db.ref('puzzle_party/sala_activa').update({
+      startedAt: state.startedAt,
+      status: 'playing'
+    });
+
+    const entries = Object.entries(state.remotePlayers || {});
+    entries.forEach(([id, p]) => {
+      db.ref(`puzzle_party/rooms/${state.pin}/players/${id}`).update({
+        board: shuffle(),
+        moves: 0,
+        seconds: 0,
+        status: 'jugando',
+        completed: false,
+        startedAt: state.startedAt
+      });
+    });
+  }
+
   renderAll();
 }
 
@@ -754,8 +759,8 @@ function joinRoom() {
   const pin = $('#pinInput')?.value.trim();
   const name = $('#nameInput')?.value.trim();
 
-  if (!pin || pin !== state.pin || !state.roomOpen || state.status !== 'lobby') {
-    joinError = 'No encontramos una sala abierta con ese PIN. Revisa la pantalla grande.';
+  if (!pin) {
+    joinError = 'Ingresa el PIN de 6 dígitos que aparece en la pantalla grande.';
     renderAll();
     return;
   }
@@ -765,20 +770,68 @@ function joinRoom() {
     return;
   }
 
-  player = name.slice(0, 20);
-  playerIcon = $('#avatarInput')?.value || avatars[0];
-  localStorage.setItem('puzzle-deluxe-player', player);
-  localStorage.setItem('puzzle-deluxe-avatar', playerIcon);
-  sessionStorage.setItem('puzzle-deluxe-id', playerId);
-
   joinError = '';
-  state.board = [...state.target];
-  state.moves = 0;
-  state.seconds = 0;
-  state.completed = false;
-
-  persist();
   renderAll();
+
+  // Consultar en Firebase Realtime Database
+  if (!db) {
+    joinError = 'Conectando con el servidor... Intenta nuevamente en un segundo.';
+    renderAll();
+    return;
+  }
+
+  db.ref(`puzzle_party/rooms/${pin}`).once('value', snapshot => {
+    const room = snapshot.val();
+    if (!room) {
+      joinError = `No encontramos una sala con el PIN ${pin}. Revisa la pantalla grande.`;
+      renderAll();
+      return;
+    }
+    if (room.roomOpen === false && room.status !== 'lobby') {
+      joinError = 'La sala está cerrada o la partida ya comenzó.';
+      renderAll();
+      return;
+    }
+
+    // Sala válida: ingresar
+    player = name.slice(0, 20);
+    playerIcon = $('#avatarInput')?.value || avatars[0];
+    localStorage.setItem('puzzle-deluxe-player', player);
+    localStorage.setItem('puzzle-deluxe-avatar', playerIcon);
+    sessionStorage.setItem('puzzle-deluxe-id', playerId);
+
+    state.pin = pin;
+    state.mode = room.mode || 'pattern';
+    state.size = room.size || 3;
+    state.title = room.title || 'Patrón de color';
+    state.target = room.target || initialTarget(state.size);
+    state.board = [...state.target];
+    state.image = room.image || null;
+    state.status = room.status || 'lobby';
+    state.moves = 0;
+    state.seconds = 0;
+    state.completed = false;
+
+    // Registrar jugador en la sala
+    db.ref(`puzzle_party/rooms/${pin}/players/${playerId}`).set({
+      id: playerId,
+      name: player,
+      avatar: playerIcon,
+      board: state.board,
+      moves: 0,
+      seconds: 0,
+      status: 'esperando',
+      completed: false,
+      joinedAt: Date.now()
+    });
+
+    // Suscribir a eventos de la sala
+    subscribeToRoom(pin);
+    renderAll();
+  }).catch(err => {
+    joinError = 'Error de conexión: ' + err.message;
+    renderAll();
+  });
 }
 
 function buildAvatarGrid() {
@@ -804,68 +857,180 @@ function buildAvatarGrid() {
   });
 }
 
+// Suscripción en tiempo real a una sala específica
+function subscribeToRoom(pin) {
+  if (!db || !pin) return;
+
+  const roomRef = db.ref(`puzzle_party/rooms/${pin}`);
+  roomRef.on('value', snapshot => {
+    const val = snapshot.val();
+    if (!val) return;
+
+    state.pin = pin;
+    state.title = val.title || state.title;
+    state.mode = val.mode || state.mode;
+    state.size = val.size || state.size;
+    state.target = val.target || initialTarget(state.size);
+    state.image = val.image || null;
+    state.background = val.background || null;
+    state.status = val.status || 'lobby';
+    state.roomOpen = val.roomOpen !== undefined ? val.roomOpen : true;
+    state.featured = val.featured || state.featured;
+    state.startedAt = val.startedAt || null;
+
+    if (page() === 'play' && player) {
+      if (state.status === 'playing' && state.startedAt && !state.completed) {
+        timer();
+      } else if (state.status !== 'playing') {
+        clearInterval(tick);
+        state.running = false;
+      }
+    }
+    renderAll();
+  });
+
+  // Escuchar lista de jugadores
+  const playersRef = db.ref(`puzzle_party/rooms/${pin}/players`);
+  playersRef.on('value', snapshot => {
+    state.remotePlayers = snapshot.val() || {};
+
+    if (page() === 'play' && player) {
+      const mine = state.remotePlayers[playerId];
+      if (mine) {
+        if (mine.board?.length) state.board = mine.board;
+        if (Number.isFinite(mine.moves)) state.moves = mine.moves;
+        if (Number.isFinite(mine.seconds)) state.seconds = mine.seconds;
+        state.completed = !!mine.completed;
+        if (mine.status === 'jugando') timer();
+        if (mine.status === 'terminó') {
+          state.running = false;
+          clearInterval(tick);
+        }
+      }
+    }
+    renderAll();
+  });
+}
+
 function connectFirebase() {
   const config = window.PUZZLE_FIREBASE_CONFIG;
   if (!window.firebase || !config) return;
 
   try {
-    if (!firebase.apps.length) firebase.initializeApp(config);
-    db = firebase.firestore();
+    if (!firebase.apps.length) {
+      firebase.initializeApp(config);
+    }
+    db = firebase.database();
+    isConnected = true;
+    console.log("🔥 Conectado a Firebase Realtime Database");
 
-    firebase.auth().onAuthStateChanged(currentUser => {
-      user = currentUser;
-      if (!currentUser) {
-        firebase.auth().signInAnonymously().catch(() => {});
-        return;
-      }
+    // Sincronización automática de sala activa
+    if (page() === 'screen') {
+      // Pantalla TV: escuchar sala activa global
+      const urlParams = new URLSearchParams(location.search);
+      const urlPin = urlParams.get('pin') || urlParams.get('room');
 
-      if (page() === 'play' && playerId !== currentUser.uid) {
-        playerId = currentUser.uid;
-        sessionStorage.setItem('puzzle-deluxe-id', playerId);
-      }
-
-      cloudReady = true;
-
-      // Escuchar cambios en la sala
-      eventRef().onSnapshot(snap => {
-        if (!snap.exists) return;
-        state = { ...state, ...snap.data() };
-        if (page() === 'play' && player) {
-          if (state.status === 'lobby' && state.roomOpen) persist();
-          if (state.status === 'playing' && state.startedAt && !state.completed) timer();
-          else if (state.status !== 'playing') {
-            clearInterval(tick);
-            state.running = false;
+      if (urlPin) {
+        subscribeToRoom(urlPin);
+      } else {
+        db.ref('puzzle_party/activeRoom').on('value', snap => {
+          const pin = snap.val();
+          if (pin && pin !== state.pin) {
+            subscribeToRoom(pin);
           }
+        });
+      }
+    } else if (page() === 'admin') {
+      // Admin: cargar sala activa existente o crear una inicial
+      db.ref('puzzle_party/activeRoom').once('value', snap => {
+        const pin = snap.val();
+        if (pin) {
+          state.pin = pin;
+          subscribeToRoom(pin);
+        } else {
+          newRoom();
         }
-        renderAll();
       });
-
-      // Escuchar jugadores
-      playersRef().onSnapshot(snap => {
-        state.remotePlayers = {};
-        snap.forEach(doc => { state.remotePlayers[doc.id] = doc.data(); });
-
-        if (page() === 'play' && player) {
-          const mine = state.remotePlayers[playerId];
-          if (mine) {
-            if (mine.board?.length) state.board = mine.board;
-            if (Number.isFinite(mine.moves)) state.moves = mine.moves;
-            if (Number.isFinite(mine.seconds)) state.seconds = mine.seconds;
-            state.completed = !!mine.completed;
-            if (mine.status === 'jugando') timer();
-            if (mine.status === 'terminó') {
-              state.running = false;
-              clearInterval(tick);
-            }
+    } else if (page() === 'play') {
+      // Jugador: si ya estaba unido a una sala
+      const urlParams = new URLSearchParams(location.search);
+      const urlPin = urlParams.get('pin') || urlParams.get('room');
+      if (urlPin && $('#pinInput')) {
+        $('#pinInput').value = urlPin;
+        setTimeout(() => $('#nameInput')?.focus(), 250);
+      } else {
+        // Prellenar con sala activa si está en lobby
+        db.ref('puzzle_party/activeRoom').once('value', snap => {
+          const pin = snap.val();
+          if (pin && $('#pinInput') && !$('#pinInput').value) {
+            $('#pinInput').value = pin;
           }
-        }
-        renderAll();
-      });
-    });
+        });
+      }
+    }
   } catch (e) {
-    console.warn('Firebase init:', e.message);
+    console.error('Error conectando a Firebase RTDB:', e);
   }
+}
+
+// Soporte de Gestos Swipe táctiles en el móvil
+function enableSwipeGestures() {
+  const boardEl = $('#puzzleBoard');
+  if (!boardEl) return;
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  boardEl.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }
+  }, { passive: true });
+
+  boardEl.addEventListener('touchend', e => {
+    if (state.status !== 'playing' || state.completed) return;
+    if (e.changedTouches.length === 1) {
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      const dy = e.changedTouches[0].clientY - touchStartY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      if (Math.max(absDx, absDy) > 25) {
+        const emptyIdx = state.board.indexOf(null);
+        if (emptyIdx === -1) return;
+        const n = state.size;
+        const emptyRow = Math.floor(emptyIdx / n);
+        const emptyCol = emptyIdx % n;
+
+        let targetIdx = -1;
+        if (absDx > absDy) {
+          // Deslizamiento horizontal
+          if (dx > 0 && emptyCol > 0) {
+            // Deslizó hacia la derecha -> mueve la ficha a la izquierda del espacio
+            targetIdx = emptyIdx - 1;
+          } else if (dx < 0 && emptyCol < n - 1) {
+            // Deslizó hacia la izquierda -> mueve la ficha a la derecha del espacio
+            targetIdx = emptyIdx + 1;
+          }
+        } else {
+          // Deslizamiento vertical
+          if (dy > 0 && emptyRow > 0) {
+            // Deslizó hacia abajo -> mueve la ficha de arriba al espacio
+            targetIdx = emptyIdx - n;
+          } else if (dy < 0 && emptyRow < n - 1) {
+            // Deslizó hacia arriba -> mueve la ficha de abajo al espacio
+            targetIdx = emptyIdx + n;
+          }
+        }
+
+        if (targetIdx >= 0 && targetIdx < tileCount()) {
+          const val = state.board[targetIdx];
+          if (val !== null) move(val);
+        }
+      }
+    }
+  }, { passive: true });
 }
 
 function bindEvents() {
@@ -876,6 +1041,7 @@ function bindEvents() {
     });
 
     buildAvatarGrid();
+    enableSwipeGestures();
 
     $('#restartBtn')?.addEventListener('click', resetPlayer);
     $('#hintBtn')?.addEventListener('click', () => {
@@ -896,8 +1062,10 @@ function bindEvents() {
     $('#applyRoundBtn')?.addEventListener('click', applyConfiguration);
     $('#roomLockBtn')?.addEventListener('click', () => {
       state.roomOpen = !state.roomOpen;
-      if (state.roomOpen) state.status = 'lobby';
-      persist();
+      if (db && state.pin) {
+        db.ref(`puzzle_party/rooms/${state.pin}/roomOpen`).set(state.roomOpen);
+        db.ref(`puzzle_party/sala_activa/roomOpen`).set(state.roomOpen);
+      }
       renderAll();
     });
     $('#startGameBtn')?.addEventListener('click', startGame);
@@ -914,7 +1082,9 @@ function bindEvents() {
 
     $('#spotlightSelect')?.addEventListener('change', e => {
       state.featured = e.target.value || null;
-      persist();
+      if (db && state.pin) {
+        db.ref(`puzzle_party/rooms/${state.pin}/featured`).set(state.featured);
+      }
       renderAll();
     });
 
@@ -929,7 +1099,9 @@ function bindEvents() {
           state.mode = 'image';
           if ($('#modeSelect')) $('#modeSelect').value = 'image';
           if ($('#uploadText')) $('#uploadText').textContent = file.name;
-          persist();
+          if (db && state.pin) {
+            db.ref(`puzzle_party/rooms/${state.pin}`).update({ image: data, mode: 'image' });
+          }
           renderAll();
         });
       }
@@ -942,8 +1114,10 @@ function bindEvents() {
           if (err) { alert(err); return; }
           state.background = data;
           if ($('#backgroundName')) $('#backgroundName').textContent = file.name;
-          persist();
-          renderAll();
+          if (db && state.pin) {
+            db.ref(`puzzle_party/rooms/${state.pin}/background`).set(data);
+          }
+          renderRoomInfo();
         });
       }
     });
@@ -951,41 +1125,46 @@ function bindEvents() {
     $('#removeBackgroundBtn')?.addEventListener('click', () => {
       state.background = null;
       if ($('#backgroundName')) $('#backgroundName').textContent = 'Sin fondo';
-      persist();
+      if (db && state.pin) {
+        db.ref(`puzzle_party/rooms/${state.pin}/background`).set(null);
+      }
       renderRoomInfo();
     });
 
     $('#resetScoresBtn')?.addEventListener('click', () => {
       if (confirm('¿Reiniciar la clasificación?')) {
         state.scores = [];
-        persist();
+        if (db && state.pin) {
+          const entries = Object.keys(state.remotePlayers || {});
+          entries.forEach(id => {
+            db.ref(`puzzle_party/rooms/${state.pin}/players/${id}`).update({
+              moves: 0,
+              seconds: 0,
+              status: 'esperando',
+              completed: false
+            });
+          });
+        }
         renderAll();
       }
     });
   }
 
-  // Auto-fill PIN si viene en URL
-  const urlParams = new URLSearchParams(location.search);
-  const pinFromUrl = urlParams.get('pin') || urlParams.get('room');
-  if (pinFromUrl && $('#pinInput')) {
-    $('#pinInput').value = pinFromUrl;
-    setTimeout(() => $('#nameInput')?.focus(), 200);
+  if (page() === 'screen') {
+    $('#screenFullscreenBtn')?.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      }
+    });
   }
 }
 
 function init() {
-  try {
-    const saved = localStorage.getItem('puzzle-party-state');
-    if (saved) state = { ...state, ...JSON.parse(saved) };
-  } catch (e) {}
-
   state.size = state.size === 4 ? 4 : 3;
-  if (!Array.isArray(state.target) || state.target.length !== tileCount()) {
-    state.target = initialTarget(state.size);
-  }
-  if (!Array.isArray(state.board) || state.board.length !== tileCount()) {
-    state.board = [...state.target];
-  }
+  state.target = initialTarget(state.size);
+  state.board = [...state.target];
 
   renderAll();
   connectFirebase();
