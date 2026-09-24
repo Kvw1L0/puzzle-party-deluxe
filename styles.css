@@ -155,6 +155,8 @@ body {
   box-shadow: none;
   cursor: default;
   pointer-events: none;
+}
+
 .tv-target-board-large {
   display: grid;
   gap: 10px;

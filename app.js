@@ -415,17 +415,32 @@ function renderPlayers() {
               <span class="text-[11px] text-slate-400">${p.moves || 0} mov. · ${format(p.seconds || 0)}</span>
             </div>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5">
             <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${p.status === 'terminó' ? 'bg-emerald-400/20 text-emerald-300' : 'bg-white/10 text-slate-300'}">
               ${p.status || 'conectado'}
             </span>
-            <button class="text-xs px-2.5 py-1 rounded-lg ${isSelected ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-white/10 text-slate-300 hover:text-white'}">
+            <button type="button" class="spotlight-btn text-xs px-2.5 py-1 rounded-lg ${isSelected ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-white/10 text-slate-300 hover:text-white'}">
               ${isSelected ? '★ En TV' : 'Destacar'}
+            </button>
+            <button type="button" class="kick-btn text-xs px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/25 text-red-300 border border-red-500/20 hover:border-red-500/40 transition-colors" title="Expulsar de la sala">
+              ✕
             </button>
           </div>
         `;
-        row.onclick = () => {
+        row.querySelector('.spotlight-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
           state.featured = isSelected ? null : id; // Toggle spotlight
+          if (db && state.pin) {
+            db.ref(`puzzle_party/rooms/${state.pin}/featured`).set(state.featured);
+          }
+          renderAll();
+        });
+        row.querySelector('.kick-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          kickPlayer(id);
+        });
+        row.onclick = () => {
+          state.featured = isSelected ? null : id;
           if (db && state.pin) {
             db.ref(`puzzle_party/rooms/${state.pin}/featured`).set(state.featured);
           }
@@ -553,16 +568,34 @@ function renderRoomInfo() {
   // Admin Controls
   const lock = $('#roomLockBtn');
   if (lock) {
-    lock.textContent = state.roomOpen ? 'Cerrar Sala' : 'Abrir Sala';
-    lock.classList.toggle('bg-red-500/20', state.roomOpen);
-    lock.classList.toggle('text-red-300', state.roomOpen);
+    lock.textContent = state.roomOpen ? 'Bloquear Acceso' : 'Permitir Acceso';
+    lock.classList.toggle('bg-amber-500/20', !state.roomOpen);
+    lock.classList.toggle('text-amber-300', !state.roomOpen);
   }
 
   const startBtn = $('#startGameBtn');
+  const count = Object.keys(state.remotePlayers || {}).length;
   if (startBtn) {
-    const count = Object.keys(state.remotePlayers || {}).length;
     startBtn.disabled = count === 0 || state.status === 'playing';
     startBtn.classList.toggle('opacity-50', startBtn.disabled);
+  }
+
+  const finishBtn = $('#finishRoundBtn');
+  if (finishBtn) {
+    finishBtn.disabled = state.status !== 'playing';
+    finishBtn.classList.toggle('opacity-50', finishBtn.disabled);
+  }
+
+  const lobbyBtn = $('#backToLobbyBtn');
+  if (lobbyBtn) {
+    lobbyBtn.disabled = state.status === 'lobby' || !state.pin;
+    lobbyBtn.classList.toggle('opacity-50', lobbyBtn.disabled);
+  }
+
+  const closeBtn = $('#closeRoomBtn');
+  if (closeBtn) {
+    closeBtn.disabled = !state.pin;
+    closeBtn.classList.toggle('opacity-50', closeBtn.disabled);
   }
 
   renderQr();
@@ -829,6 +862,182 @@ function restartForEveryone() {
   renderAll();
 }
 
+function finishRound() {
+  if (state.status !== 'playing') return;
+  if (!confirm('¿Finalizar la ronda actual? Se congelarán los tiempos para el podio.')) return;
+  state.status = 'finished';
+  state.completed = true;
+  clearInterval(tick);
+  state.running = false;
+
+  if (db && state.pin) {
+    db.ref(`puzzle_party/rooms/${state.pin}`).update({
+      status: 'finished'
+    });
+    db.ref('puzzle_party/sala_activa').update({
+      status: 'finished'
+    });
+  }
+  renderAll();
+}
+
+function backToLobby() {
+  if (!confirm('¿Regresar al lobby con todos los participantes para una nueva ronda?')) return;
+  state.status = 'lobby';
+  state.roomOpen = true;
+  state.startedAt = null;
+  state.completed = false;
+  state.running = false;
+  state.featured = null;
+  lastCelebratedPlayer = null;
+
+  if (db && state.pin) {
+    db.ref(`puzzle_party/rooms/${state.pin}`).update({
+      status: 'lobby',
+      roomOpen: true,
+      startedAt: null,
+      featured: null
+    });
+    db.ref('puzzle_party/sala_activa').update({
+      status: 'lobby',
+      roomOpen: true,
+      startedAt: null
+    });
+
+    const entries = Object.keys(state.remotePlayers || {});
+    entries.forEach(id => {
+      const freshBoard = generateShuffledBoard(state.size, state.target);
+      db.ref(`puzzle_party/rooms/${state.pin}/players/${id}`).update({
+        board: freshBoard,
+        moves: 0,
+        seconds: 0,
+        status: 'esperando',
+        completed: false,
+        startedAt: null
+      });
+    });
+  }
+  renderAll();
+}
+
+function closeRoom() {
+  if (!confirm('¿CERRAR LA SALA? Esta acción desconectará a todos los participantes y reiniciará la sesión a foja cero.')) return;
+  const pin = state.pin;
+  if (db && pin) {
+    db.ref(`puzzle_party/rooms/${pin}`).update({
+      status: 'CLOSED',
+      roomOpen: false,
+      players: null,
+      closedAt: Date.now()
+    }).catch(() => {});
+    db.ref('puzzle_party/activeRoom').set(null).catch(() => {});
+    db.ref('puzzle_party/sala_activa').update({
+      status: 'CLOSED',
+      roomOpen: false
+    }).catch(() => {});
+  }
+  unsubscribeFromRoom();
+  state.pin = null;
+  state.remotePlayers = {};
+  state.status = 'lobby';
+  state.startedAt = null;
+  state.completed = false;
+  state.running = false;
+  state.featured = null;
+  renderAll();
+  alert('La sala ha sido cerrada exitosamente. Los jugadores han sido desconectados.');
+}
+
+function kickPlayer(targetId) {
+  const p = state.remotePlayers?.[targetId];
+  const name = p ? p.name : 'este jugador';
+  if (!confirm(`¿Expulsar a "${name}" de la sala?`)) return;
+  if (db && state.pin && targetId) {
+    db.ref(`puzzle_party/rooms/${state.pin}/players/${targetId}`).remove().catch(err => {
+      console.error('Error expulsando jugador:', err);
+    });
+  }
+}
+
+function triggerCelebrationOnTv() {
+  const players = Object.values(state.remotePlayers || {});
+  const winner = players.find(p => p.completed) || players[0];
+  if (!winner) {
+    alert('No hay participantes en la sala aún para celebrar.');
+    return;
+  }
+  const payload = {
+    id: winner.id,
+    name: winner.name,
+    avatar: winner.avatar || '👑',
+    seconds: winner.seconds || 0,
+    moves: winner.moves || 0,
+    time: Date.now()
+  };
+  if (db && state.pin) {
+    db.ref(`puzzle_party/rooms/${state.pin}/celebrateEvent`).set(payload);
+  }
+  celebrateWinner(payload);
+}
+
+let bgMusicPlaying = false;
+let bgMusicInterval = null;
+let bgAudioCtx = null;
+
+function toggleMusic() {
+  const btn = $('#musicBtn');
+  if (bgMusicPlaying) {
+    bgMusicPlaying = false;
+    if (bgMusicInterval) {
+      clearInterval(bgMusicInterval);
+      bgMusicInterval = null;
+    }
+    if (btn) {
+      btn.innerHTML = '<i data-lucide="music" class="w-4 h-4 text-amber-400"></i> Música';
+      btn.classList.remove('bg-emerald-500/20', 'text-emerald-300', 'border-emerald-500/40');
+      if (window.lucide) window.lucide.createIcons();
+    }
+    return;
+  }
+
+  bgMusicPlaying = true;
+  if (btn) {
+    btn.innerHTML = '<i data-lucide="volume-x" class="w-4 h-4 text-emerald-400"></i> Pausar Música';
+    btn.classList.add('bg-emerald-500/20', 'text-emerald-300', 'border-emerald-500/40');
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  try {
+    if (!bgAudioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      bgAudioCtx = new AudioContextClass();
+    }
+    if (bgAudioCtx.state === 'suspended') {
+      bgAudioCtx.resume();
+    }
+    const notes = [261.63, 329.63, 392.00, 523.25, 440.00, 392.00, 329.63, 293.66, 329.63, 392.00, 523.25, 659.25];
+    let noteIdx = 0;
+    bgMusicInterval = setInterval(() => {
+      if (!bgMusicPlaying || !bgAudioCtx) return;
+      try {
+        const osc = bgAudioCtx.createOscillator();
+        const gain = bgAudioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(notes[noteIdx % notes.length], bgAudioCtx.currentTime);
+        gain.gain.setValueAtTime(0.035, bgAudioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, bgAudioCtx.currentTime + 0.32);
+        osc.connect(gain);
+        gain.connect(bgAudioCtx.destination);
+        osc.start();
+        osc.stop(bgAudioCtx.currentTime + 0.35);
+        noteIdx++;
+      } catch (e) {}
+    }, 320);
+  } catch (e) {
+    console.warn('Audio no soportado:', e);
+  }
+}
+
 function optimizeImage(file, callback) {
   const url = URL.createObjectURL(file);
   const img = new Image();
@@ -995,7 +1204,20 @@ function subscribeToRoom(pin) {
   currentRoomRef = db.ref(`puzzle_party/rooms/${cleanPin}`);
   currentRoomRef.on('value', snapshot => {
     const val = snapshot.val();
-    if (!val) return;
+    if (!val || val.status === 'CLOSED') {
+      if (page() === 'play' && player) {
+        clearInterval(tick);
+        state.running = false;
+        player = '';
+        state.pin = null;
+        sessionStorage.removeItem('puzzle-deluxe-joined-room');
+        localStorage.removeItem('puzzle-deluxe-pin');
+        unsubscribeFromRoom();
+        alert('La sala ha sido cerrada por el anfitrión.');
+        renderAll();
+      }
+      return;
+    }
 
     state.pin = cleanPin;
     state.title = val.title || state.title;
@@ -1009,6 +1231,14 @@ function subscribeToRoom(pin) {
     state.featured = val.featured || null;
     state.startedAt = val.startedAt || null;
 
+    // Sincronizar evento de celebración manual o automático en pantalla TV
+    if (page() === 'screen' && val.celebrateEvent) {
+      if (!lastCelebratedPlayer || lastCelebratedPlayer.time !== val.celebrateEvent.time) {
+        lastCelebratedPlayer = val.celebrateEvent;
+        celebrateWinner(val.celebrateEvent);
+      }
+    }
+
     if (page() === 'play' && player) {
       if (state.status === 'playing') {
         // Asegurar que el tablero esté desordenado al empezar la partida
@@ -1019,7 +1249,7 @@ function subscribeToRoom(pin) {
         if (!state.completed) {
           timer();
         }
-      } else if (state.status !== 'playing') {
+      } else {
         clearInterval(tick);
         state.running = false;
       }
@@ -1030,10 +1260,26 @@ function subscribeToRoom(pin) {
   // Escuchar lista de jugadores
   currentPlayersRef = db.ref(`puzzle_party/rooms/${cleanPin}/players`);
   currentPlayersRef.on('value', snapshot => {
-    state.remotePlayers = snapshot.val() || {};
+    const newPlayers = snapshot.val() || {};
+    const wasJoined = Boolean(player && state.remotePlayers && state.remotePlayers[playerId]);
+    state.remotePlayers = newPlayers;
 
     if (page() === 'play' && player) {
       const mine = state.remotePlayers[playerId];
+      if (wasJoined && !mine) {
+        // Expulsado de la sala por el anfitrión
+        clearInterval(tick);
+        state.running = false;
+        player = '';
+        state.pin = null;
+        sessionStorage.removeItem('puzzle-deluxe-joined-room');
+        localStorage.removeItem('puzzle-deluxe-pin');
+        unsubscribeFromRoom();
+        alert('Has sido retirado de la sala por el anfitrión.');
+        renderAll();
+        return;
+      }
+
       if (mine) {
         if (Array.isArray(mine.board) && mine.board.length === tileCount()) {
           state.board = mine.board;
@@ -1044,7 +1290,7 @@ function subscribeToRoom(pin) {
         if (mine.status === 'jugando' && !state.completed) {
           timer();
         }
-        if (mine.status === 'terminó') {
+        if (mine.status === 'terminó' || mine.status === 'finished') {
           state.running = false;
           clearInterval(tick);
         }
@@ -1212,7 +1458,12 @@ function bindEvents() {
       renderAll();
     });
     $('#startGameBtn')?.addEventListener('click', startGame);
+    $('#finishRoundBtn')?.addEventListener('click', finishRound);
+    $('#backToLobbyBtn')?.addEventListener('click', backToLobby);
     $('#globalRestartBtn')?.addEventListener('click', restartForEveryone);
+    $('#closeRoomBtn')?.addEventListener('click', closeRoom);
+    $('#celebrateWinnerBtn')?.addEventListener('click', triggerCelebrationOnTv);
+    $('#musicBtn')?.addEventListener('click', toggleMusic);
 
     $('#copyLinkBtn')?.addEventListener('click', async () => {
       try {
