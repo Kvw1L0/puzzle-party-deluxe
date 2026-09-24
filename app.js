@@ -11,10 +11,29 @@ const modes = {
 };
 
 // -1 representa el espacio vacío (nunca es eliminado por Firebase RTDB)
-const initialTarget = size => {
+const initialTarget = (size = 3) => {
   const total = size * size;
   return Array.from({ length: total }, (_, i) => i === total - 1 ? -1 : i);
 };
+
+function normalizeTarget(rawTarget, size = 3) {
+  const total = size * size;
+  if (!Array.isArray(rawTarget) || rawTarget.length === 0) {
+    return initialTarget(size);
+  }
+  // Si el target viene con total - 1 elementos (ej: 8 fichas para 3x3) y falta el -1
+  if (rawTarget.length === total - 1 && !rawTarget.includes(-1)) {
+    return [...rawTarget.map(Number), -1];
+  }
+  if (rawTarget.length !== total) {
+    return initialTarget(size);
+  }
+  const cleaned = rawTarget.map((v, i) => (v === null || v === undefined || isNaN(v)) ? -1 : Number(v));
+  if (!cleaned.includes(-1)) {
+    cleaned[cleaned.length - 1] = -1;
+  }
+  return cleaned;
+}
 
 let state = {
   mode: 'pattern',
@@ -37,10 +56,15 @@ let state = {
   soundOn: false
 };
 
-let player = sessionStorage.getItem('puzzle-deluxe-id') ? (localStorage.getItem('puzzle-deluxe-player') || '') : '';
+let player = '';
 let playerIcon = localStorage.getItem('puzzle-deluxe-avatar') || avatars[0];
 let playerId = sessionStorage.getItem('puzzle-deluxe-id') || `p_${Math.random().toString(36).slice(2, 9)}`;
 sessionStorage.setItem('puzzle-deluxe-id', playerId);
+
+function isPlayerJoined() {
+  if (page() !== 'play') return false;
+  return !!player && !!state.pin && !!(state.remotePlayers && state.remotePlayers[playerId]);
+}
 
 let tick = null;
 let db = null;
@@ -121,17 +145,22 @@ function isSolved(board, target) {
   return board.every((val, idx) => val === target[idx]);
 }
 
-// Genera un tablero 100% resoluble y garantizadamente desordenado
+// Genera un tablero 100% resoluble y garantizadamente desordenado (sin undefined ni null)
 function generateShuffledBoard(size, target) {
+  const cleanTarget = normalizeTarget(target, size);
   const len = size * size;
-  let board = [...target];
+  let board = [...cleanTarget];
   let empty = board.indexOf(-1);
-  if (empty === -1) empty = len - 1;
+  if (empty === -1) {
+    empty = len - 1;
+    board[empty] = -1;
+  }
   let last = -1;
   const movesCount = Math.max(90, len * 24);
 
   for (let i = 0; i < movesCount; i++) {
     const choices = neighbours(empty, size).filter(idx => idx !== last);
+    if (!choices.length) break;
     const next = choices[Math.floor(Math.random() * choices.length)];
     [board[empty], board[next]] = [board[next], board[empty]];
     last = empty;
@@ -139,12 +168,16 @@ function generateShuffledBoard(size, target) {
   }
 
   // Garantizar que NO quede resuelto por casualidad
-  if (isSolved(board, target)) {
+  if (isSolved(board, cleanTarget)) {
     const choices = neighbours(empty, size);
-    const next = choices[0];
-    [board[empty], board[next]] = [board[next], board[empty]];
+    if (choices.length > 0) {
+      const next = choices[0];
+      [board[empty], board[next]] = [board[next], board[empty]];
+    }
   }
-  return board;
+
+  // Sanitización final: ningún elemento puede ser undefined, null o NaN
+  return board.map((v, idx) => (v === undefined || v === null || isNaN(v)) ? (idx === len - 1 ? -1 : idx) : Number(v));
 }
 
 function format(seconds = 0) {
@@ -506,7 +539,7 @@ function renderRoomInfo() {
 
   // Switch de vistas en Jugador Móvil
   if (page() === 'play') {
-    const hasJoined = !!player;
+    const hasJoined = isPlayerJoined();
     if ($('#joinForm')) $('#joinForm').classList.toggle('hidden', hasJoined);
     if ($('#waitingRoom')) $('#waitingRoom').classList.toggle('hidden', !hasJoined || state.status !== 'lobby');
     if ($('#closedRoom')) $('#closedRoom').classList.toggle('hidden', !hasJoined || ['lobby', 'playing', 'finished'].includes(state.status));
@@ -686,6 +719,7 @@ function newRoom() {
   state.startedAt = null;
   state.completed = false;
   state.running = false;
+  state.target = initialTarget(state.size);
   state.board = generateShuffledBoard(state.size, state.target);
   state.remotePlayers = {};
   lastCelebratedPlayer = null;
@@ -696,9 +730,9 @@ function newRoom() {
       code: pin,
       roomOpen: true,
       status: 'lobby',
-      title: state.title,
-      mode: state.mode,
-      size: state.size,
+      title: state.title || 'Patrón de color',
+      mode: state.mode || 'pattern',
+      size: state.size || 3,
       target: state.target,
       image: state.image || null,
       startedAt: null,
@@ -823,8 +857,8 @@ function optimizeImage(file, callback) {
 }
 
 function joinRoom() {
-  const pin = $('#pinInput')?.value.trim();
-  const name = $('#nameInput')?.value.trim();
+  const pin = ($('#pinInput')?.value || '').trim().toUpperCase();
+  const name = ($('#nameInput')?.value || '').trim();
 
   if (!pin) {
     joinError = 'Ingresa el PIN de 6 dígitos que aparece en la pantalla grande.';
@@ -864,13 +898,14 @@ function joinRoom() {
     playerIcon = $('#avatarInput')?.value || avatars[0];
     localStorage.setItem('puzzle-deluxe-player', player);
     localStorage.setItem('puzzle-deluxe-avatar', playerIcon);
+    localStorage.setItem('puzzle-deluxe-pin', pin);
     sessionStorage.setItem('puzzle-deluxe-id', playerId);
 
     state.pin = pin;
     state.mode = room.mode || 'pattern';
-    state.size = room.size || 3;
+    state.size = Number(room.size) === 4 ? 4 : 3;
     state.title = room.title || 'Patrón de color';
-    state.target = room.target || initialTarget(state.size);
+    state.target = normalizeTarget(room.target, state.size);
     // El puzzle del jugador SIEMPRE inicia desordenado
     state.board = generateShuffledBoard(state.size, state.target);
     state.image = room.image || null;
@@ -880,17 +915,28 @@ function joinRoom() {
     state.completed = false;
 
     // Registrar jugador en la sala con tablero desordenado
-    db.ref(`puzzle_party/rooms/${pin}/players/${playerId}`).set({
+    const playerPayload = {
       id: playerId,
       name: player,
-      avatar: playerIcon,
+      avatar: playerIcon || '🦊',
       board: state.board,
       moves: 0,
       seconds: 0,
       status: 'esperando',
       completed: false,
       joinedAt: Date.now()
+    };
+
+    const playerRef = db.ref(`puzzle_party/rooms/${pin}/players/${playerId}`);
+    playerRef.set(playerPayload).then(() => {
+      console.log('Jugador registrado en RTDB:', playerId, player);
+    }).catch(err => {
+      console.error('Error registrando jugador en RTDB:', err);
+      joinError = 'Error al registrar jugador: ' + err.message;
+      renderAll();
     });
+
+    playerRef.onDisconnect().update({ status: 'desconectado' });
 
     subscribeToRoom(pin);
     renderAll();
@@ -923,20 +969,39 @@ function buildAvatarGrid() {
   });
 }
 
+let currentRoomRef = null;
+let currentPlayersRef = null;
+
+function unsubscribeFromRoom() {
+  if (currentRoomRef) {
+    currentRoomRef.off();
+    currentRoomRef = null;
+  }
+  if (currentPlayersRef) {
+    currentPlayersRef.off();
+    currentPlayersRef = null;
+  }
+}
+
 // Suscripción en tiempo real a una sala específica
 function subscribeToRoom(pin) {
   if (!db || !pin) return;
 
-  const roomRef = db.ref(`puzzle_party/rooms/${pin}`);
-  roomRef.on('value', snapshot => {
+  unsubscribeFromRoom();
+
+  const cleanPin = pin.toString().trim().toUpperCase();
+  state.pin = cleanPin;
+
+  currentRoomRef = db.ref(`puzzle_party/rooms/${cleanPin}`);
+  currentRoomRef.on('value', snapshot => {
     const val = snapshot.val();
     if (!val) return;
 
-    state.pin = pin;
+    state.pin = cleanPin;
     state.title = val.title || state.title;
     state.mode = val.mode || state.mode;
-    state.size = val.size || state.size;
-    state.target = val.target || initialTarget(state.size);
+    state.size = Number(val.size) === 4 ? 4 : 3;
+    state.target = normalizeTarget(val.target, state.size);
     state.image = val.image || null;
     state.background = val.background || null;
     state.status = val.status || 'lobby';
@@ -963,8 +1028,8 @@ function subscribeToRoom(pin) {
   });
 
   // Escuchar lista de jugadores
-  const playersRef = db.ref(`puzzle_party/rooms/${pin}/players`);
-  playersRef.on('value', snapshot => {
+  currentPlayersRef = db.ref(`puzzle_party/rooms/${cleanPin}/players`);
+  currentPlayersRef.on('value', snapshot => {
     state.remotePlayers = snapshot.val() || {};
 
     if (page() === 'play' && player) {
@@ -1018,7 +1083,6 @@ function connectFirebase() {
       db.ref('puzzle_party/activeRoom').once('value', snap => {
         const pin = snap.val();
         if (pin) {
-          state.pin = pin;
           subscribeToRoom(pin);
         } else {
           newRoom();
@@ -1027,13 +1091,18 @@ function connectFirebase() {
     } else if (page() === 'play') {
       const urlParams = new URLSearchParams(location.search);
       const urlPin = urlParams.get('pin') || urlParams.get('room');
+      const savedPlayer = localStorage.getItem('puzzle-deluxe-player') || '';
+      if (savedPlayer && $('#nameInput') && !$('#nameInput').value) {
+        $('#nameInput').value = savedPlayer;
+      }
+
       if (urlPin && $('#pinInput')) {
         $('#pinInput').value = urlPin;
         setTimeout(() => $('#nameInput')?.focus(), 250);
       } else {
-        db.ref('puzzle_party/activeRoom').once('value', snap => {
+        db.ref('puzzle_party/activeRoom').on('value', snap => {
           const pin = snap.val();
-          if (pin && $('#pinInput') && !$('#pinInput').value) {
+          if (pin && $('#pinInput') && (!$('#pinInput').value || !isPlayerJoined())) {
             $('#pinInput').value = pin;
           }
         });
@@ -1109,6 +1178,15 @@ function bindEvents() {
     enableSwipeGestures();
 
     $('#restartBtn')?.addEventListener('click', resetPlayer);
+    $('#leaveRoomBtn')?.addEventListener('click', () => {
+      if (db && state.pin && playerId) {
+        db.ref(`puzzle_party/rooms/${state.pin}/players/${playerId}`).remove().catch(() => {});
+      }
+      player = '';
+      sessionStorage.removeItem('puzzle-deluxe-joined-room');
+      unsubscribeFromRoom();
+      renderAll();
+    });
     $('#hintBtn')?.addEventListener('click', () => {
       const modal = $('#targetModal');
       if (modal) modal.classList.toggle('hidden');
