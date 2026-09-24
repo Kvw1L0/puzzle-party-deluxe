@@ -1,0 +1,205 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Bebas+Neue&family=Titan+One&display=swap');
+
+:root {
+  --bg-dark: #070714;
+  --bg-card: rgba(15, 16, 38, 0.75);
+  --gold-glow: rgba(251, 191, 36, 0.5);
+  --gold-primary: #fbbf24;
+  --gold-accent: #f59e0b;
+  --purple-glow: rgba(124, 58, 237, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  color: #ffffff;
+  background-color: var(--bg-dark);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.font-outfit {
+  font-family: 'Outfit', sans-serif;
+}
+
+.font-impact {
+  font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 0.05em;
+}
+
+/* Backgrounds & Vignette */
+.default-tv-bg {
+  background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, #0f1026 50%, #070714 100%);
+  background-attachment: fixed;
+}
+
+.tv-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, transparent 30%, rgba(0, 0, 0, 0.6) 100%), rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Glow Utilities */
+.glow-gold-tv {
+  box-shadow: 0 0 35px rgba(251, 191, 36, 0.45);
+}
+
+.glow-gold-lg {
+  box-shadow: 0 0 50px rgba(251, 191, 36, 0.6);
+}
+
+.text-glow-gold {
+  text-shadow: 0 0 25px rgba(250, 204, 21, 0.8), 0 0 50px rgba(217, 119, 6, 0.5);
+}
+
+.text-glow-white {
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.7);
+}
+
+/* Animations */
+@keyframes heroPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.animate-hero-pulse {
+  animation: heroPulse 1s infinite ease-in-out;
+}
+
+@keyframes neonGlow {
+  0%, 100% { opacity: 0.85; filter: drop-shadow(0 0 15px rgba(245, 158, 11, 0.8)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 30px rgba(239, 68, 68, 0.9)); }
+}
+
+.animate-neon-glow {
+  animation: neonGlow 1.2s infinite alternate;
+}
+
+@keyframes popIn {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-pop-in {
+  animation: popIn 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* Puzzle Boards */
+.puzzle-board {
+  display: grid;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 12px;
+  border-radius: 24px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 440px;
+  margin: 0 auto;
+  touch-action: manipulation;
+}
+
+.screen-board-large {
+  max-width: 420px;
+  gap: 10px;
+  padding: 14px;
+  border: 3px solid rgba(251, 191, 36, 0.3);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+
+.target-board {
+  display: grid;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 140px;
+  margin: 0 auto;
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 900;
+  font-size: clamp(1.4rem, 4vw, 2.2rem);
+  color: #ffffff;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.2s ease;
+  min-height: 0;
+}
+
+.tile:not(.empty):active {
+  transform: scale(0.96);
+}
+
+.tile.empty {
+  background: transparent !important;
+  border: 2px dashed rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+  cursor: default;
+  pointer-events: none;
+}
+
+.tile.is-correct {
+  border-color: rgba(74, 222, 128, 0.8) !important;
+}
+
+.tile.is-correct::after {
+  content: '✓';
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 0.75rem;
+  color: #4ade80;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.target-tile {
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.target-tile.empty {
+  background: transparent !important;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(251, 191, 36, 0.4);
+}

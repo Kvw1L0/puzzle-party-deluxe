@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Puzzle Party Deluxe · Panel de Administración</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- QRCode Client Library -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="admin" class="default-tv-bg text-white min-h-screen flex flex-col p-4 sm:p-6 bg-cover bg-center">
+
+  <div id="vignetteOverlay" class="tv-vignette"></div>
+
+  <!-- TOP APP BAR -->
+  <header class="relative z-20 border-b border-white/10 bg-black/40 backdrop-blur-md px-6 py-3.5 rounded-2xl flex items-center justify-between mb-6 shadow-xl">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-amber-500 text-slate-950 font-outfit font-black text-xl flex items-center justify-center shadow-lg glow-gold-tv">
+        P!
+      </div>
+      <div>
+        <h1 class="font-outfit font-black text-xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-amber-400 to-yellow-200 uppercase drop-shadow">
+          Puzzle Party <span class="text-white font-light">Admin</span>
+        </h1>
+      </div>
+    </div>
+
+    <!-- Acceso directo a Pantalla TV -->
+    <div class="flex items-center gap-3">
+      <span class="hidden md:inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/10 text-xs font-bold text-slate-300">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Centro de Control
+      </span>
+      <a href="/pantalla.html" target="_blank" class="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 text-slate-950 font-outfit font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-lg glow-gold-tv active:scale-95 transition-all">
+        <i data-lucide="tv" class="w-4 h-4"></i> Pantalla Gigante ↗
+      </a>
+    </div>
+  </header>
+
+  <!-- CONTENEDOR PRINCIPAL -->
+  <main class="relative z-10 max-w-6xl w-full mx-auto flex flex-col gap-6">
+
+    <!-- FILA 1: CONTROL DE SALA Y PIN -->
+    <section class="bg-black/50 border border-white/15 rounded-3xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
+      
+      <!-- PIN Display -->
+      <div class="flex items-center gap-6">
+        <div class="bg-gradient-to-r from-black/90 via-amber-950/60 to-black/90 border-2 border-amber-400 px-8 py-3.5 rounded-2xl text-center shadow-xl glow-gold-tv min-w-[200px]">
+          <span class="text-[10px] font-black uppercase tracking-widest text-slate-400 block">PIN DE INGRESO</span>
+          <strong id="adminPin" class="font-outfit font-black text-5xl text-amber-300 font-mono tracking-widest block leading-tight">—</strong>
+          <span id="roomPlayerCount" class="text-xs font-bold text-slate-300 mt-1 block">0 en sala</span>
+        </div>
+
+        <!-- Mini QR Preview -->
+        <div class="hidden sm:block p-3 bg-white rounded-2xl shadow-xl">
+          <img id="adminQr" alt="QR" class="w-24 h-24 object-contain">
+        </div>
+      </div>
+
+      <!-- Botones de Control de Sala -->
+      <div class="flex flex-wrap items-center justify-center md:justify-end gap-3 flex-1">
+        <button id="newRoundBtn" class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-white uppercase tracking-wider transition-all flex items-center gap-1.5 active:scale-95">
+          <i data-lucide="plus-circle" class="w-4 h-4 text-amber-400"></i> Nueva Sala
+        </button>
+        <button id="roomLockBtn" class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-white uppercase tracking-wider transition-all flex items-center gap-1.5 active:scale-95">
+          <i data-lucide="lock" class="w-4 h-4 text-amber-400"></i> Abrir Sala
+        </button>
+        <button id="startGameBtn" class="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 text-slate-950 font-outfit font-black text-sm uppercase tracking-wider shadow-lg glow-gold-tv transition-all flex items-center gap-2 active:scale-95">
+          <i data-lucide="play" class="w-4 h-4 fill-slate-950"></i> Iniciar Puzzle
+        </button>
+        <button id="globalRestartBtn" class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-white uppercase tracking-wider transition-all flex items-center gap-1.5 active:scale-95">
+          <i data-lucide="rotate-ccw" class="w-4 h-4 text-amber-400"></i> Reiniciar Todos
+        </button>
+        <button id="copyLinkBtn" class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-white uppercase tracking-wider transition-all flex items-center gap-1.5 active:scale-95">
+          <i data-lucide="share-2" class="w-4 h-4 text-amber-400"></i> Copiar Enlace
+        </button>
+      </div>
+
+    </section>
+
+    <!-- FILA 2: PARTICIPANTES & MONITOREO EN VIVO -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      
+      <!-- Columna 1: Participantes en Sala (7 cols) -->
+      <section class="lg:col-span-7 bg-black/50 border border-white/15 rounded-3xl p-6 backdrop-blur-xl shadow-2xl flex flex-col h-[480px]">
+        <div class="flex items-center justify-between mb-4 border-b border-white/10 pb-3">
+          <div>
+            <h2 class="font-outfit font-black text-xl text-white flex items-center gap-2">
+              <i data-lucide="users" class="w-5 h-5 text-amber-400"></i> Participantes
+            </h2>
+            <span id="playerCount" class="text-xs font-bold text-slate-400">0 conectados</span>
+          </div>
+          <div class="w-48">
+            <input id="playerSearch" placeholder="Buscar..." class="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-amber-400">
+          </div>
+        </div>
+
+        <div id="playerList" class="flex-1 overflow-y-auto space-y-2 pr-1">
+          <p class="text-xs text-slate-400 italic text-center py-16">
+            Abre una sala y comparte el PIN para recibir jugadores.
+          </p>
+        </div>
+      </section>
+
+      <!-- Columna 2: Proyección en Vivo y Jugador Destacado (5 cols) -->
+      <section class="lg:col-span-5 bg-black/50 border border-white/15 rounded-3xl p-6 backdrop-blur-xl shadow-2xl flex flex-col h-[480px]">
+        <div class="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+          <h3 class="font-outfit font-black text-lg text-white flex items-center gap-2">
+            <i data-lucide="monitor" class="w-4 h-4 text-amber-400"></i> Proyección en TV
+          </h3>
+          <span id="featuredName" class="text-xs font-bold text-amber-300">Sin seleccionar</span>
+        </div>
+
+        <div class="mb-3">
+          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Destacar en pantalla grande:</label>
+          <select id="spotlightSelect" class="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-amber-400">
+            <option value="">Selecciona jugador destacado</option>
+          </select>
+        </div>
+
+        <!-- Mini Preview del Tablero -->
+        <div class="flex-1 flex flex-col items-center justify-center p-2 bg-black/40 rounded-2xl border border-white/10">
+          <div id="livePreview" class="puzzle-board" style="max-width: 240px; padding: 8px; gap: 4px;"></div>
+        </div>
+
+        <div class="mt-3 flex justify-between items-center text-xs text-slate-400 pt-2 border-t border-white/10">
+          <span>Este tablero se proyecta en la TV gigante</span>
+          <button id="featureBtn" class="text-amber-400 hover:text-amber-300 font-bold">Actualizar ↻</button>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- FILA 3: CONFIGURACIÓN DE LA EXPERIENCIA -->
+    <section class="bg-black/50 border border-white/15 rounded-3xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+      <div class="border-b border-white/10 pb-4 mb-6">
+        <h2 class="font-outfit font-black text-2xl text-white flex items-center gap-2">
+          <i data-lucide="sliders" class="w-6 h-6 text-amber-400"></i> Configuración de la Experiencia
+        </h2>
+        <p class="text-xs text-slate-300 mt-1">Configura el tipo de desafío antes de iniciar la partida.</p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <!-- Modalidad -->
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Modalidad:</label>
+          <select id="modeSelect" class="w-full bg-white/10 border border-white/20 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-amber-400">
+            <option value="pattern">Patrón de color</option>
+            <option value="numbers">Números en orden</option>
+            <option value="memory">Memoria visual</option>
+            <option value="image">Imagen personalizada PNG</option>
+            <option value="brand">Modo marca</option>
+          </select>
+        </div>
+
+        <!-- Nombre del reto -->
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Nombre del reto:</label>
+          <input id="roundTitle" value="Patrón de color" class="w-full bg-white/10 border border-white/20 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-amber-400">
+        </div>
+
+        <!-- Tamaño de la Grilla -->
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Grilla:</label>
+          <select id="gridSize" class="w-full bg-white/10 border border-white/20 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-amber-400">
+            <option value="3">3 × 3 · 8 fichas (Recomendado)</option>
+            <option value="4">4 × 4 · 15 fichas (Experto)</option>
+          </select>
+        </div>
+
+        <!-- Botón Guardar Config -->
+        <div class="flex items-end">
+          <button id="applyRoundBtn" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 text-slate-950 font-outfit font-black text-sm uppercase tracking-wider shadow-lg glow-gold-tv active:scale-95 transition-all">
+            Guardar Cambios
+          </button>
+        </div>
+      </div>
+
+      <!-- Subida de Imagenes y Música -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-white/10 items-center">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Imagen para el puzzle:</label>
+          <input id="imageUpload" type="file" accept="image/png,image/jpeg" class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-white/10 file:text-amber-300 hover:file:bg-white/20">
+          <span id="uploadText" class="text-[11px] text-slate-400 block mt-1">Sin imagen</span>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Fondo global PNG:</label>
+          <input id="backgroundUpload" type="file" accept="image/png,image/jpeg" class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-white/10 file:text-amber-300 hover:file:bg-white/20">
+          <span id="backgroundName" class="text-[11px] text-slate-400 block mt-1">Sin fondo</span>
+          <button id="removeBackgroundBtn" class="text-[11px] text-red-400 hover:underline mt-0.5">Quitar fondo</button>
+        </div>
+
+        <div class="flex items-end justify-start sm:justify-end">
+          <button id="musicBtn" class="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-amber-300 uppercase tracking-wider transition-all flex items-center gap-2">
+            <i data-lucide="music" class="w-4 h-4"></i> Música silenciada
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- FILA 4: CLASIFICACIÓN Y RESULTADOS -->
+    <section class="bg-black/50 border border-white/15 rounded-3xl p-6 backdrop-blur-xl shadow-2xl">
+      <div class="flex items-center justify-between mb-4 border-b border-white/10 pb-3">
+        <h2 class="font-outfit font-black text-xl text-white flex items-center gap-2">
+          <i data-lucide="trophy" class="w-5 h-5 text-amber-400"></i> Clasificación General
+        </h2>
+        <button id="resetScoresBtn" class="text-xs font-bold text-red-400 hover:text-red-300 bg-red-950/40 border border-red-500/30 px-3 py-1.5 rounded-xl">
+          Reiniciar Resultados
+        </button>
+      </div>
+      <div id="leaderboard" class="space-y-2">
+        <p class="text-xs text-slate-400 italic text-center py-6">
+          Los resultados se registrarán en tiempo real cuando los participantes completen el puzzle.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="firebase.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  </script>
+</body>
+</html>

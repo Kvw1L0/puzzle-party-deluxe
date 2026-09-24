@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Puzzle Party Deluxe · Pantalla Gigante</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- QRCode Client Library -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="screen" class="default-tv-bg text-white h-screen w-screen flex flex-col justify-between p-6 relative overflow-hidden bg-cover bg-center">
+
+  <!-- Vignette Overlay para legibilidad con fondos personalizados -->
+  <div id="vignetteOverlay" class="tv-vignette"></div>
+
+  <!-- TV TOP BAR -->
+  <header class="relative z-20 flex items-center justify-between px-6 py-3 w-full border-b border-white/10 bg-black/40 backdrop-blur-md rounded-2xl shadow-lg">
+    <!-- Brand -->
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-amber-500 text-slate-950 font-outfit font-black text-xl flex items-center justify-center shadow-lg glow-gold-tv">
+        P!
+      </div>
+      <div>
+        <h1 class="font-outfit font-black text-xl sm:text-2xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-amber-400 to-yellow-200 uppercase drop-shadow">
+          Puzzle Party <span class="text-white font-light">Deluxe</span>
+        </h1>
+      </div>
+    </div>
+
+    <!-- Live Status / Mode Pill -->
+    <div class="flex items-center gap-4">
+      <div class="hidden sm:flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-md">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-sm"></span>
+        <span id="screenRoomStatus" class="text-xs font-bold uppercase tracking-wider text-slate-200">Sala en Vivo</span>
+        <span class="text-slate-500">|</span>
+        <b id="screenMode" class="text-xs font-bold text-amber-300 uppercase tracking-wider">Patrón de color</b>
+      </div>
+
+      <!-- Botón Fullscreen -->
+      <button id="screenFullscreenBtn" class="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center justify-center text-white transition-all shadow-lg backdrop-blur-md" title="Pantalla Completa">
+        <i data-lucide="maximize" class="w-5 h-5"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== CONTENEDOR PRINCIPAL ==================== -->
+  <main class="relative z-10 flex-1 flex items-center justify-center p-2 sm:p-4 my-auto">
+
+    <!-- ==================== VISTA 1: LOBBY & QR GIGANTE (ESTILO BACHILLERATO) ==================== -->
+    <section id="tvViewLobby" class="flex flex-col items-center justify-center text-center max-w-6xl mx-auto w-full my-auto">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-14 items-center w-full">
+        
+        <!-- Columna Izquierda: QR Code Gigante y PIN Monumental -->
+        <div class="flex flex-col items-center">
+          <div class="p-6 sm:p-8 bg-white rounded-3xl shadow-2xl glow-gold-tv hover:scale-105 transition-transform duration-500">
+            <img id="tvQrImage" src="" alt="Código QR de la sala" class="w-72 h-72 sm:w-80 sm:h-80 md:w-96 md:h-96 object-contain rounded-2xl">
+          </div>
+
+          <!-- PIN DE LA SALA GIGANTE -->
+          <div class="mt-6 bg-gradient-to-r from-black/90 via-amber-950/60 to-black/90 border-2 border-amber-400 px-10 py-4 rounded-3xl text-center shadow-2xl glow-gold-tv w-full max-w-md">
+            <span class="text-xs uppercase tracking-widest text-slate-300 font-extrabold block">
+              PIN DE SALA
+            </span>
+            <span id="screenPin" class="font-outfit font-black text-6xl sm:text-7xl text-amber-300 tracking-widest font-mono">
+              ------
+            </span>
+            <p class="text-xs text-slate-300 mt-2 font-medium">
+              Escanea el QR o entra a: <span id="joinLink" class="text-amber-400 font-bold font-mono"></span>
+            </p>
+          </div>
+        </div>
+
+        <!-- Columna Derecha: Lista de Jugadores Conectados en Vivo -->
+        <div class="bg-black/50 border border-white/15 rounded-3xl p-6 sm:p-8 backdrop-blur-xl flex flex-col h-[480px] lg:h-[560px] w-full shadow-2xl">
+          <div class="flex items-center justify-between mb-4 border-b border-white/10 pb-3">
+            <h3 class="font-outfit font-extrabold text-xl text-white flex items-center gap-2">
+              <i data-lucide="users" class="w-5 h-5 text-amber-400"></i> Jugadores en Sala
+            </h3>
+            <span id="tvLobbyCount" class="text-xs font-bold bg-amber-400/20 text-amber-300 px-3 py-1 rounded-full border border-amber-400/30">
+              0
+            </span>
+          </div>
+
+          <!-- Grid de Jugadores -->
+          <div id="tvPlayersGrid" class="flex-1 overflow-y-auto flex flex-wrap content-start gap-3 pr-2">
+            <div id="tvEmptyMessage" class="text-sm text-slate-400 italic py-16 w-full text-center">
+              Esperando a que los jugadores ingresen el PIN o escaneen el QR...
+            </div>
+          </div>
+
+          <!-- Indicador inferior de sala -->
+          <div class="mt-4 pt-3 border-t border-white/10 flex items-center justify-center gap-2 text-xs font-semibold text-slate-400">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+            <span id="screenLobbyStatus">Esperando que el anfitrión libere el puzzle</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==================== VISTA 2: PARTIDA EN VIVO ==================== -->
+    <section id="tvViewGame" class="hidden flex-col items-center justify-center w-full max-w-6xl mx-auto my-auto gap-4">
+      
+      <!-- Barra Superior de Estadísticas del Desafío -->
+      <div class="w-full flex items-center justify-between bg-black/60 border border-white/15 px-6 py-3 rounded-2xl backdrop-blur-xl shadow-xl">
+        <div class="flex items-center gap-4">
+          <span class="px-3 py-1 rounded-full bg-amber-400/20 border border-amber-400/40 text-amber-300 font-outfit font-black text-xs uppercase tracking-wider">
+            EN JUEGO
+          </span>
+          <h2 id="liveGameTitle" class="font-outfit font-black text-xl text-white drop-shadow">
+            Patrón de color
+          </h2>
+        </div>
+
+        <!-- Cronómetro Central Gigante -->
+        <div class="flex items-center gap-3">
+          <i data-lucide="clock" class="w-5 h-5 text-amber-400"></i>
+          <span id="screenClock" class="font-outfit font-black text-4xl sm:text-5xl text-amber-300 tracking-wider font-mono">
+            00:00.0
+          </span>
+        </div>
+
+        <!-- PIN Reminder -->
+        <div class="hidden sm:flex items-center gap-2 text-xs font-mono bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 text-slate-300">
+          <span>PIN:</span>
+          <strong id="tvLivePin" class="text-amber-400">------</strong>
+        </div>
+      </div>
+
+      <!-- Arena de Juego (2 Columnas: Jugador Destacado + Ranking) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start">
+        
+        <!-- Columna Izquierda/Central: Tablero del Jugador Destacado (7 cols) -->
+        <div class="lg:col-span-7 bg-black/50 border border-white/15 rounded-3xl p-6 backdrop-blur-xl shadow-2xl flex flex-col items-center">
+          <div class="w-full flex items-center justify-between mb-4 border-b border-white/10 pb-3">
+            <div>
+              <span class="text-[11px] font-black uppercase tracking-widest text-amber-400 block">JUGADOR/A DESTACADO/A</span>
+              <h3 id="screenPlayer" class="font-outfit font-black text-2xl text-white flex items-center gap-2 mt-0.5">
+                Sin seleccionar
+              </h3>
+            </div>
+            <div class="text-right">
+              <span class="text-xs text-slate-400 uppercase font-semibold">Movimientos:</span>
+              <strong id="screenMoves" class="font-outfit font-black text-xl text-amber-300 ml-1">0</strong>
+            </div>
+          </div>
+
+          <!-- Barra de Progreso del Jugador -->
+          <div class="w-full mb-4">
+            <div class="flex justify-between text-xs font-bold text-slate-300 mb-1">
+              <span>Progreso de armado:</span>
+              <span id="screenProgress" class="text-emerald-400 font-mono">0%</span>
+            </div>
+            <div class="w-full bg-white/10 rounded-full h-2.5 overflow-hidden">
+              <div id="screenProgressBar" class="bg-gradient-to-r from-amber-400 to-emerald-400 h-full transition-all duration-300 rounded-full" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <!-- Tablero Deslizante en Pantalla -->
+          <div id="screenBoard" class="puzzle-board screen-board-large"></div>
+        </div>
+
+        <!-- Columna Derecha: Objetivo y Clasificación (5 cols) -->
+        <div class="lg:col-span-5 flex flex-col gap-4">
+          
+          <!-- Mini Card: Patrón Objetivo -->
+          <div class="bg-black/50 border border-white/15 rounded-3xl p-5 backdrop-blur-xl shadow-xl flex items-center justify-between">
+            <div>
+              <span class="text-[11px] font-black uppercase tracking-widest text-amber-400 block">OBJETIVO DE LA RONDA</span>
+              <p class="text-xs text-slate-300 mt-1 max-w-[180px]">Así debe quedar el puzzle resuelto:</p>
+            </div>
+            <div id="targetBoard" class="target-board"></div>
+          </div>
+
+          <!-- Card: Tabla de Clasificación en Vivo -->
+          <div class="bg-black/50 border border-white/15 rounded-3xl p-5 backdrop-blur-xl shadow-2xl flex flex-col h-[380px]">
+            <div class="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+              <h4 class="font-outfit font-extrabold text-base text-white flex items-center gap-2">
+                <i data-lucide="trophy" class="w-4 h-4 text-amber-400"></i> Clasificación en Vivo
+              </h4>
+              <span class="text-[11px] uppercase font-bold text-slate-400">Tiempo / Mov.</span>
+            </div>
+            <div id="screenRanking" class="flex-1 overflow-y-auto space-y-2 pr-1">
+              <p class="text-xs text-slate-400 text-center py-10 italic">
+                Los participantes que terminen aparecerán aquí en el podio.
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==================== OVERLAY MONUMENTAL: JUGADOR TERMINÓ EL PUZZLE ==================== -->
+  <div id="tvOverlayCompleted" class="fixed inset-0 bg-slate-950/95 backdrop-blur-3xl z-50 hidden flex-col items-center justify-center p-6 text-center select-none overflow-hidden transition-all duration-500">
+    <div class="relative z-10 flex flex-col items-center justify-center gap-5 max-w-4xl mx-auto animate-pop-in">
+      
+      <!-- Corona / Medalla -->
+      <span class="inline-block px-6 py-2 rounded-full bg-gradient-to-r from-amber-500/20 via-yellow-500/30 to-amber-500/20 border-2 border-amber-400 text-amber-300 font-outfit font-black text-sm uppercase tracking-widest shadow-2xl glow-gold-tv">
+        🏆 ¡PUZZLE RESUELTO!
+      </span>
+
+      <!-- Título de Victoria -->
+      <h1 class="font-outfit font-black text-6xl sm:text-8xl text-white tracking-tight uppercase leading-none drop-shadow-2xl text-glow-gold">
+        ¡Tenemos Ganador!
+      </h1>
+
+      <!-- Tarjeta Hero del Jugador -->
+      <div class="px-10 py-6 rounded-3xl bg-black/80 border-4 border-amber-400 shadow-2xl flex items-center justify-center gap-6 animate-hero-pulse glow-gold-lg mt-2">
+        <span id="tvWinnerAvatar" class="text-7xl sm:text-8xl">🦊</span>
+        <div class="text-left">
+          <h2 id="tvWinnerName" class="font-outfit font-black text-4xl sm:text-6xl text-amber-300 uppercase tracking-wider drop-shadow-2xl font-mono">
+            JUGADOR
+          </h2>
+          <div class="flex items-center gap-4 mt-2 text-sm sm:text-base font-bold text-slate-200">
+            <span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-4 h-4 text-amber-400"></i> <b id="tvWinnerTime" class="text-white font-mono">00:00.0</b></span>
+            <span>•</span>
+            <span class="flex items-center gap-1.5"><i data-lucide="move" class="w-4 h-4 text-amber-400"></i> <b id="tvWinnerMoves" class="text-white">0</b> mov.</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 uppercase tracking-widest mt-2 font-bold animate-pulse">
+        El ranking se actualiza en pantalla grande...
+      </p>
+    </div>
+  </div>
+
+  <script src="firebase.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    function toggleFullScreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      }
+    }
+  </script>
+</body>
+</html>

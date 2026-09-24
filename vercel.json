@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "name": "puzzle-party-deluxe",
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/tv", "destination": "/pantalla.html" },
+    { "source": "/tv.html", "destination": "/pantalla.html" },
+    { "source": "/pantalla", "destination": "/pantalla.html" },
+    { "source": "/admin", "destination": "/admin.html" }
+  ]
+}
